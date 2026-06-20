@@ -91,14 +91,15 @@ Go to **Settings** in the app to add a Groq, Cerebras, or Mistral API key. This 
 
 ## What's built so far
 
-- **Create Diagram** — add boxes, drag to position, tap two boxes to connect them, save/load diagrams
-- **Analyze Diagram** — upload an image, get an AI explanation (if a key is set) or write your own, save it
+- **Create Diagram (v2)** — shape palette (box, circle, decision, process), drag nodes to position, drag from edge handles to connect nodes, click to select + delete, double-click to rename, zoom (wheel or buttons) and pan (drag empty canvas), save/load
+- **Analyze Diagram (v2)** — upload an image, choose one of three explanation styles (step-by-step, real-world example, suggestions) via toggle buttons, each generated on demand and cached per upload, write your own if no API key is set
 - **Settings** — API key config, install button, export/import all data as JSON
 - **Storage** — IndexedDB wrapper with three stores: diagrams, analyses, settings
 - **PWA shell** — manifest, service worker, offline caching, installable on both platforms
 
 ## What's not built yet (future iterations)
 
-- Step-by-step / multiple explanation styles (discussed earlier — can layer onto Analyze)
-- Richer diagram editor (resize, delete connectors, more shapes)
+- Pre-fetching all three explanation styles at once on upload (currently generated on-demand per tab click, to limit API calls)
+- Multi-select, copy/paste, undo/redo in the diagram editor
+- Connector labels and re-routing an existing connector's endpoints
 - Any additional modules beyond Create / Analyze / Settings

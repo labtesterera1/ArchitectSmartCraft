@@ -140,7 +140,7 @@ async function deleteDiagram(id) {
 
 /**
  * Saves an uploaded-image analysis record.
- * @param {Object} analysis - { id?, imageBlob, imageName, explanation, steps, meta }
+ * @param {Object} analysis - { id?, imageBase64, imageName, explanations: {steps?, example?, suggestions?}, meta }
  * @returns {Promise<Object>} the saved analysis record
  */
 async function saveAnalysis(analysis) {
