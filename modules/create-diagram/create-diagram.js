@@ -193,7 +193,7 @@ function buildToolbar() {
     tbBtn("tb-un", TB.undo, "Undo",  S.undo.length===0),
     tbBtn("tb-re", TB.redo, "Redo",  S.redo.length===0),
     tbSep(),
-    tbBtn("tb-cn", TB.conn,  "Connector style"),
+    tbBtn("tb-cn", TB.conn,  "Connector style", false, S.tool==="connect"),
     tbBtn("tb-br", TB.brush, "Fill color"),
     tbBtn("tb-tx", TB.text,  "Text tool", false, S.tool==="text"),
     tbSep(),
@@ -244,6 +244,7 @@ function bindCanvas() {
 function canvasDown(e) {
   if (e.target !== el.svg && e.target !== el.gridBg && e.target.id !== "dd-vp") return;
   if (S.tool === "text") { placeText(e); return; }
+  if (S.tool === "connect") return; // stay armed, user needs to click a box
   startPan(e);
   setSel(null);
 }
@@ -367,7 +368,8 @@ function addShape(type) {
 // ================================================================
 
 function toggleTextTool() {
-  S.tool = S.tool === "text" ? null : "text";
+  if (S.tool === "text") { S.tool = null; }
+  else { S.tool = "text"; }
   el.svg.style.cursor = S.tool === "text" ? "text" : "grab";
   closePopup();
   buildToolbar();
@@ -394,6 +396,10 @@ function placeText(evt) {
 function closePopup() { el.popup && el.popup.classList.add("hidden"); }
 
 function openConnPopup() {
+  // If already in connect mode, toggle it off
+  if (S.tool === "connect") {
+    S.tool = null; el.svg.style.cursor = "grab"; buildToolbar(); return;
+  }
   if (!el.popup.classList.contains("hidden")) { closePopup(); return; }
   el.popup.style.left = document.getElementById("tb-cn").offsetLeft + "px";
   el.popup.innerHTML = `<div style="display:flex;flex-direction:column;gap:3px">${
@@ -405,10 +411,14 @@ function openConnPopup() {
   el.popup.querySelectorAll("[data-ls]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation();
     S.lineStyle = b.dataset.ls;
+    // If a connector is currently selected, apply immediately
     if (S.sel && S.sel.k === "conn") {
       const c = S.conns.find(c => c.id === S.sel.id);
       if (c) { snap(); c.style = S.lineStyle; draw(); }
     }
+    // Arm the connect tool — user can now click any box to start drawing
+    S.tool = "connect";
+    el.svg.style.cursor = "crosshair";
     closePopup(); buildToolbar();
   }));
 }
@@ -496,6 +506,7 @@ function drawNode(node) {
   let tapT = 0;
   g.addEventListener("click", e => {
     e.stopPropagation();
+    if (S.tool === "connect") return; // handled by mousedown below
     if (node._dragged) { node._dragged = false; return; }
     const now = Date.now();
     if (now - tapT < 400) { tapT=0; renameNode(node); return; }
@@ -505,6 +516,19 @@ function drawNode(node) {
       node.fill = S.pendingColor; S.pendingColor = null; draw();
     }
   });
+
+  // When connect tool is armed, mousedown on any box starts a connection from it
+  g.addEventListener("mousedown", e => {
+    if (S.tool !== "connect") return;
+    e.stopPropagation();
+    startConnect(node.id, e);
+  });
+  g.addEventListener("touchstart", e => {
+    if (S.tool !== "connect") return;
+    e.stopPropagation();
+    startConnect(node.id, e);
+  }, {passive:true});
+
   attachDrag(g, node);
   el.vp.appendChild(g);
 }
@@ -768,6 +792,7 @@ function startConnect(fromId, evt) {
 function attachDrag(g, node) {
   let start=null, pre=null;
   const dn = e => {
+    if (S.tool === "connect") return; // connect tool handles this mousedown instead
     e.stopPropagation();
     start = svgPt(e);
     node._ox=node.x; node._oy=node.y; node._dragged=false;
