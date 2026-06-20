@@ -852,9 +852,6 @@ function renderRemoveWaypointButton(g, conn, wp, index) {
   g.appendChild(btnGroup);
 }
 
-  g.appendChild(dot);
-}
-
 /** Prompts for a new label and applies it, with undo support. Shared by double-click (desktop) and double-tap (touch) rename. */
 function renameNode(node) {
   const newLabel = prompt("Rename box:", node.label);
