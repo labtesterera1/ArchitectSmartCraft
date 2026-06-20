@@ -22,10 +22,29 @@ import storage from "../../js/storage.js";
 
 const SHAPE_TYPES = [
   { type: "rect", label: "Box", w: 110, h: 56 },
+  { type: "rounded", label: "Process", w: 120, h: 56 },
   { type: "ellipse", label: "Circle", w: 100, h: 70 },
   { type: "diamond", label: "Decision", w: 120, h: 80 },
-  { type: "rounded", label: "Process", w: 120, h: 56 },
 ];
+
+/** Small SVG icon glyphs (24x24 viewBox) for palette tiles — drawn as outline shapes, matching the canvas style. */
+const SHAPE_ICONS = {
+  rect: `<rect x="3" y="6" width="18" height="12" rx="1.5"/>`,
+  rounded: `<rect x="3" y="6" width="18" height="12" rx="6"/>`,
+  ellipse: `<ellipse cx="12" cy="12" rx="9" ry="6.5"/>`,
+  diamond: `<polygon points="12,3 21,12 12,21 3,12"/>`,
+};
+
+/** Toolbar icon glyphs (24x24 viewBox), stroke-based, matching draw.io's compact icon strip. */
+const TOOLBAR_ICONS = {
+  zoomIn: `<circle cx="10" cy="10" r="6"/><line x1="14.5" y1="14.5" x2="20" y2="20"/><line x1="10" y1="7" x2="10" y2="13"/><line x1="7" y1="10" x2="13" y2="10"/>`,
+  zoomOut: `<circle cx="10" cy="10" r="6"/><line x1="14.5" y1="14.5" x2="20" y2="20"/><line x1="7" y1="10" x2="13" y2="10"/>`,
+  undo: `<path d="M9 7 4 12l5 5"/><path d="M4 12h11a5 5 0 0 1 0 10h-1"/>`,
+  redo: `<path d="M15 7l5 5-5 5"/><path d="M20 12H9a5 5 0 0 0 0 10h1"/>`,
+  trash: `<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>`,
+  download: `<path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M5 19h14"/>`,
+  save: `<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v6h8V4"/><path d="M8 14h8v6H8z"/>`,
+};
 
 const LINE_STYLES = [
   { key: "straight", label: "Straight" },
@@ -54,6 +73,8 @@ function freshState() {
     drag: null,        // active node drag info
     connecting: null,  // active connector-draw info
     panning: null,     // active canvas-pan info
+    undoStack: [],      // snapshots of {nodes, connectors} before each change
+    redoStack: [],
   };
 }
 
@@ -68,42 +89,83 @@ function generateId(prefix) {
 }
 
 // ----------------------------------------------------------------
+// Undo / Redo
+// ----------------------------------------------------------------
+
+const MAX_HISTORY = 50;
+
+/** Call BEFORE a mutation to push the current state onto the undo stack. */
+function snapshot() {
+  state.undoStack.push({
+    nodes: JSON.parse(JSON.stringify(state.nodes)),
+    connectors: JSON.parse(JSON.stringify(state.connectors)),
+  });
+  if (state.undoStack.length > MAX_HISTORY) state.undoStack.shift();
+  state.redoStack = [];
+}
+
+function undo() {
+  if (state.undoStack.length === 0) return;
+  const prev = state.undoStack.pop();
+  state.redoStack.push({
+    nodes: JSON.parse(JSON.stringify(state.nodes)),
+    connectors: JSON.parse(JSON.stringify(state.connectors)),
+  });
+  state.nodes = prev.nodes;
+  state.connectors = prev.connectors;
+  setSelection(null, null);
+  renderIconToolbar();
+}
+
+function redo() {
+  if (state.redoStack.length === 0) return;
+  const next = state.redoStack.pop();
+  state.undoStack.push({
+    nodes: JSON.parse(JSON.stringify(state.nodes)),
+    connectors: JSON.parse(JSON.stringify(state.connectors)),
+  });
+  state.nodes = next.nodes;
+  state.connectors = next.connectors;
+  setSelection(null, null);
+  renderIconToolbar();
+}
+
+// ----------------------------------------------------------------
 // Render shell (palette + toolbar + svg canvas + saved list)
 // ----------------------------------------------------------------
 
 function render() {
   containerEl.innerHTML = `
-    <div class="flex-between" style="margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+    <div class="flex-between" style="margin-bottom:10px; flex-wrap:wrap; gap:10px;">
       <input type="text" id="diagram-name-input" value="${escapeHtml(state.name)}"
         style="font-family: var(--font-serif); font-size:20px; border:none; background:transparent; padding:4px 0; min-width:160px;" />
-      <div class="flex gap-1">
-        <button class="btn" id="delete-selected-btn" disabled>Delete</button>
-        <button class="btn" id="download-png-btn">Download</button>
-        <button class="btn btn-primary" id="save-diagram-btn">Save</button>
-      </div>
+      <button class="btn btn-primary" id="save-diagram-btn">Save</button>
     </div>
 
-    <div class="flex gap-1" id="shape-palette" style="flex-wrap:wrap; margin-bottom:12px;"></div>
+    <div id="icon-toolbar" class="flex gap-1" style="background: var(--color-bg-raised); border:1px solid var(--color-border); border-radius: var(--radius-md); padding:6px; margin-bottom:10px; flex-wrap:wrap;"></div>
 
-    <div class="panel corner-frame" id="canvas-wrap" style="position:relative; padding:0; overflow:hidden; height:420px; touch-action:none;">
-      <svg id="diagram-svg" width="100%" height="100%" style="display:block; cursor:grab;">
-        <defs>
-          <marker id="arrow-marker" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-            <polygon points="0 0, 9 4.5, 0 9" fill="#d4ff3a" />
-          </marker>
-        </defs>
-        <g id="viewport"></g>
-      </svg>
-      <div id="connector-toolbar" class="hidden" style="position:absolute; display:flex; gap:2px; background: var(--color-bg-raised); border:1px solid var(--color-border-strong); border-radius: var(--radius-md); padding:4px; transform:translate(-50%,-120%); z-index:5;"></div>
-      <div class="flex gap-1" style="position:absolute; bottom:10px; right:10px;">
-        <button class="btn" id="zoom-out-btn" style="padding:6px 10px;">&minus;</button>
-        <button class="btn" id="zoom-reset-btn" style="padding:6px 10px; font-size:11px;">100%</button>
-        <button class="btn" id="zoom-in-btn" style="padding:6px 10px;">+</button>
+    <div style="display:flex; gap:10px; align-items:stretch;">
+      <div class="panel" id="shape-palette-wrap" style="padding:10px; width:108px; flex-shrink:0;">
+        <span class="label" style="margin-bottom:10px;">Shapes</span>
+        <div id="shape-palette" style="display:grid; grid-template-columns:1fr 1fr; gap:6px;"></div>
+      </div>
+
+      <div class="panel corner-frame" id="canvas-wrap" style="position:relative; padding:0; overflow:hidden; height:420px; flex:1; touch-action:none;">
+        <svg id="diagram-svg" width="100%" height="100%" style="display:block; cursor:grab;">
+          <defs>
+            <marker id="arrow-marker" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+              <polygon points="0 0, 9 4.5, 0 9" fill="#d4ff3a" />
+            </marker>
+          </defs>
+          <g id="viewport"></g>
+        </svg>
+        <div id="connector-toolbar" class="hidden" style="position:absolute; display:flex; gap:2px; background: var(--color-bg-raised); border:1px solid var(--color-border-strong); border-radius: var(--radius-md); padding:4px; transform:translate(-50%,-120%); z-index:5;"></div>
+        <div id="zoom-indicator" title="Double-click to reset view" style="position:absolute; bottom:10px; right:10px; font-size:11px; color: var(--color-text-tertiary); background: var(--color-bg-raised); border:1px solid var(--color-border); border-radius: var(--radius-sm); padding:4px 8px; cursor:pointer;">100%</div>
       </div>
     </div>
 
     <p style="font-size:11px; color: var(--color-text-tertiary); margin-top:8px;">
-      Click a shape to add it. Drag a node to move it. Drag from the dot on a node's edge to another node to connect. Click a node or line to select, then Delete. Scroll to zoom, drag empty canvas to pan.
+      Click a shape to add it. Drag a node to move it. Drag from the dot on a node's edge to another node to connect. Click a node or line to select, then use Delete in the toolbar. Scroll to zoom, drag empty canvas to pan.
     </p>
 
     <div class="panel mt-2" id="saved-list-panel">
@@ -115,26 +177,63 @@ function render() {
   svgEl = document.getElementById("diagram-svg");
   viewportEl = document.getElementById("viewport");
 
+  renderIconToolbar();
   renderPalette();
   document.getElementById("diagram-name-input").addEventListener("input", (e) => {
     state.name = e.target.value;
   });
   document.getElementById("save-diagram-btn").addEventListener("click", handleSave);
-  document.getElementById("delete-selected-btn").addEventListener("click", deleteSelection);
-  document.getElementById("download-png-btn").addEventListener("click", handleDownloadPng);
-  document.getElementById("zoom-in-btn").addEventListener("click", () => zoomBy(1.2));
-  document.getElementById("zoom-out-btn").addEventListener("click", () => zoomBy(1 / 1.2));
-  document.getElementById("zoom-reset-btn").addEventListener("click", resetView);
+  document.getElementById("zoom-indicator").addEventListener("dblclick", resetView);
 
   attachCanvasEvents();
   renderDiagram();
   renderSavedDiagrams();
 }
 
+/** Builds a 24x24 stroke-icon button, matching draw.io's compact toolbar style. */
+function iconButton(id, glyph, title, disabled) {
+  return `
+    <button class="btn" id="${id}" title="${title}" ${disabled ? "disabled" : ""}
+      style="padding:7px; line-height:0;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${glyph}</svg>
+    </button>`;
+}
+
+function renderIconToolbar() {
+  const toolbar = document.getElementById("icon-toolbar");
+  toolbar.innerHTML = [
+    iconButton("zoom-out-toolbar-btn", TOOLBAR_ICONS.zoomOut, "Zoom out"),
+    iconButton("zoom-in-toolbar-btn", TOOLBAR_ICONS.zoomIn, "Zoom in"),
+    spacer(),
+    iconButton("undo-btn", TOOLBAR_ICONS.undo, "Undo", !state.undoStack || state.undoStack.length === 0),
+    iconButton("redo-btn", TOOLBAR_ICONS.redo, "Redo", !state.redoStack || state.redoStack.length === 0),
+    spacer(),
+    iconButton("delete-selected-btn", TOOLBAR_ICONS.trash, "Delete selected", !state.selection),
+    spacer(),
+    iconButton("download-png-btn", TOOLBAR_ICONS.download, "Download PNG"),
+  ].join("");
+
+  document.getElementById("zoom-in-toolbar-btn").addEventListener("click", () => zoomBy(1.2));
+  document.getElementById("zoom-out-toolbar-btn").addEventListener("click", () => zoomBy(1 / 1.2));
+  document.getElementById("delete-selected-btn").addEventListener("click", deleteSelection);
+  document.getElementById("download-png-btn").addEventListener("click", handleDownloadPng);
+  document.getElementById("undo-btn").addEventListener("click", undo);
+  document.getElementById("redo-btn").addEventListener("click", redo);
+}
+
+function spacer() {
+  return `<div style="width:1px; background: var(--color-border); margin:2px 4px;"></div>`;
+}
+
 function renderPalette() {
   const palette = document.getElementById("shape-palette");
   palette.innerHTML = SHAPE_TYPES.map(
-    (s) => `<button class="btn" data-shape="${s.type}">+ ${s.label}</button>`
+    (s) => `
+      <button class="btn" data-shape="${s.type}" title="${s.label}"
+        style="display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 4px; line-height:0;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">${SHAPE_ICONS[s.type]}</svg>
+        <span style="font-size:9px; line-height:1; letter-spacing:0.02em;">${s.label}</span>
+      </button>`
   ).join("");
   palette.querySelectorAll("[data-shape]").forEach((btn) => {
     btn.addEventListener("click", () => addShape(btn.dataset.shape));
@@ -146,6 +245,7 @@ function renderPalette() {
 // ----------------------------------------------------------------
 
 function addShape(type) {
+  snapshot();
   const def = SHAPE_TYPES.find((s) => s.type === type);
   const count = state.nodes.length;
   const node = {
@@ -160,6 +260,7 @@ function addShape(type) {
   state.nodes.push(node);
   setSelection("node", node.id);
   renderDiagram();
+  renderIconToolbar();
 }
 
 // ----------------------------------------------------------------
@@ -171,7 +272,7 @@ function applyViewportTransform() {
     "transform",
     `translate(${state.pan.x} ${state.pan.y}) scale(${state.scale})`
   );
-  const label = document.getElementById("zoom-reset-btn");
+  const label = document.getElementById("zoom-indicator");
   if (label) label.textContent = `${Math.round(state.scale * 100)}%`;
 }
 
@@ -272,6 +373,7 @@ function setSelection(kind, id) {
 
 function deleteSelection() {
   if (!state.selection) return;
+  snapshot();
   if (state.selection.kind === "node") {
     const id = state.selection.id;
     state.nodes = state.nodes.filter((n) => n.id !== id);
@@ -280,6 +382,7 @@ function deleteSelection() {
     state.connectors = state.connectors.filter((c) => c.id !== state.selection.id);
   }
   setSelection(null, null);
+  renderIconToolbar();
 }
 
 // ----------------------------------------------------------------
@@ -483,8 +586,10 @@ function renderNode(node) {
     e.stopPropagation();
     const newLabel = prompt("Rename box:", node.label);
     if (newLabel !== null && newLabel.trim()) {
+      snapshot();
       node.label = newLabel.trim();
       renderDiagram();
+      renderIconToolbar();
     }
   });
 
@@ -538,11 +643,16 @@ function makeShapeElement(node, isSelected) {
 
 function attachNodeDrag(g, node) {
   let start = null;
+  let preDragSnapshot = null;
 
   const onDown = (e) => {
     e.stopPropagation();
     const point = svgPointFromEvent(e);
     start = { x: point.x, y: point.y, origX: node.x, origY: node.y, moved: false };
+    preDragSnapshot = {
+      nodes: JSON.parse(JSON.stringify(state.nodes)),
+      connectors: JSON.parse(JSON.stringify(state.connectors)),
+    };
     g.style.cursor = "grabbing";
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -564,7 +674,14 @@ function attachNodeDrag(g, node) {
   };
 
   const onUp = () => {
+    if (start && start.moved && preDragSnapshot) {
+      state.undoStack.push(preDragSnapshot);
+      if (state.undoStack.length > MAX_HISTORY) state.undoStack.shift();
+      state.redoStack = [];
+      renderIconToolbar();
+    }
     start = null;
+    preDragSnapshot = null;
     g.style.cursor = "grab";
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
@@ -617,9 +734,11 @@ function startConnector(fromNodeId, evt) {
     );
     tempLine.remove();
     if (target) {
+      snapshot();
       const newConn = { id: generateId("conn"), from: fromNodeId, to: target.id, lineStyle: "straight" };
       state.connectors.push(newConn);
       setSelection("connector", newConn.id);
+      renderIconToolbar();
     } else {
       renderDiagram();
     }
