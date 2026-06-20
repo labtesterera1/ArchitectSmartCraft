@@ -27,6 +27,12 @@ const SHAPE_TYPES = [
   { type: "rounded", label: "Process", w: 120, h: 56 },
 ];
 
+const LINE_STYLES = [
+  { key: "straight", label: "Straight" },
+  { key: "curved", label: "Curved" },
+  { key: "orthogonal", label: "Right angle" },
+];
+
 const HANDLE_R = 5;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 2.5;
@@ -72,6 +78,7 @@ function render() {
         style="font-family: var(--font-serif); font-size:20px; border:none; background:transparent; padding:4px 0; min-width:160px;" />
       <div class="flex gap-1">
         <button class="btn" id="delete-selected-btn" disabled>Delete</button>
+        <button class="btn" id="download-png-btn">Download</button>
         <button class="btn btn-primary" id="save-diagram-btn">Save</button>
       </div>
     </div>
@@ -87,6 +94,7 @@ function render() {
         </defs>
         <g id="viewport"></g>
       </svg>
+      <div id="connector-toolbar" class="hidden" style="position:absolute; display:flex; gap:2px; background: var(--color-bg-raised); border:1px solid var(--color-border-strong); border-radius: var(--radius-md); padding:4px; transform:translate(-50%,-120%); z-index:5;"></div>
       <div class="flex gap-1" style="position:absolute; bottom:10px; right:10px;">
         <button class="btn" id="zoom-out-btn" style="padding:6px 10px;">&minus;</button>
         <button class="btn" id="zoom-reset-btn" style="padding:6px 10px; font-size:11px;">100%</button>
@@ -113,6 +121,7 @@ function render() {
   });
   document.getElementById("save-diagram-btn").addEventListener("click", handleSave);
   document.getElementById("delete-selected-btn").addEventListener("click", deleteSelection);
+  document.getElementById("download-png-btn").addEventListener("click", handleDownloadPng);
   document.getElementById("zoom-in-btn").addEventListener("click", () => zoomBy(1.2));
   document.getElementById("zoom-out-btn").addEventListener("click", () => zoomBy(1 / 1.2));
   document.getElementById("zoom-reset-btn").addEventListener("click", resetView);
@@ -170,12 +179,14 @@ function zoomBy(factor) {
   const newScale = clamp(state.scale * factor, MIN_SCALE, MAX_SCALE);
   state.scale = newScale;
   applyViewportTransform();
+  if (state.selection && state.selection.kind === "connector") renderDiagram();
 }
 
 function resetView() {
   state.scale = 1;
   state.pan = { x: 60, y: 40 };
   applyViewportTransform();
+  if (state.selection && state.selection.kind === "connector") renderDiagram();
 }
 
 function clamp(v, min, max) {
@@ -222,6 +233,7 @@ function startPan(evt) {
   const point = evt.touches ? evt.touches[0] : evt;
   state.panning = { startX: point.clientX, startY: point.clientY, origPan: { ...state.pan } };
   svgEl.style.cursor = "grabbing";
+  hideConnectorToolbar();
 
   const onMove = (e) => {
     if (!state.panning) return;
@@ -234,6 +246,7 @@ function startPan(evt) {
   const onUp = () => {
     state.panning = null;
     svgEl.style.cursor = "grab";
+    if (state.selection && state.selection.kind === "connector") renderDiagram();
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
     document.removeEventListener("touchmove", onMove);
@@ -253,6 +266,7 @@ function setSelection(kind, id) {
   state.selection = kind ? { kind, id } : null;
   const delBtn = document.getElementById("delete-selected-btn");
   if (delBtn) delBtn.disabled = !state.selection;
+  if (kind !== "connector") hideConnectorToolbar();
   renderDiagram();
 }
 
@@ -281,6 +295,51 @@ function renderDiagram() {
   state.nodes.forEach((node) => renderNode(node));
 }
 
+/** Shows a small floating toolbar (line style picker) near the selected connector's midpoint, screen-positioned in CSS pixels. */
+function positionConnectorToolbar(p1, p2) {
+  const toolbar = document.getElementById("connector-toolbar");
+  if (!toolbar) return;
+
+  const conn = state.connectors.find(
+    (c) => state.selection && c.id === state.selection.id
+  );
+  if (!conn) return;
+
+  // midpoint in diagram coords -> screen coords (apply pan/scale)
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+  const screenX = midX * state.scale + state.pan.x;
+  const screenY = midY * state.scale + state.pan.y;
+
+  toolbar.style.left = `${screenX}px`;
+  toolbar.style.top = `${screenY}px`;
+  toolbar.classList.remove("hidden");
+
+  toolbar.innerHTML = LINE_STYLES.map(
+    (s) =>
+      `<button class="btn${(conn.lineStyle || "straight") === s.key ? " btn-primary" : ""}" data-line-style="${s.key}" style="padding:5px 9px; font-size:11px; border:none;" title="${s.label}">${lineStyleIcon(s.key)}</button>`
+  ).join("");
+
+  toolbar.querySelectorAll("[data-line-style]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      conn.lineStyle = btn.dataset.lineStyle;
+      renderDiagram();
+    });
+  });
+}
+
+function lineStyleIcon(key) {
+  if (key === "curved") return "&#x2937;";
+  if (key === "orthogonal") return "&#x231F;";
+  return "&#x2192;";
+}
+
+function hideConnectorToolbar() {
+  const toolbar = document.getElementById("connector-toolbar");
+  if (toolbar) toolbar.classList.add("hidden");
+}
+
 function nodeCenter(node) {
   return { x: node.x + node.w / 2, y: node.y + node.h / 2 };
 }
@@ -301,6 +360,24 @@ function edgePoint(node, targetX, targetY) {
   return { x: c.x + dx * s, y: c.y + dy * s };
 }
 
+/** Builds an SVG path "d" string for a connector between two edge points, based on line style. */
+function buildConnectorPath(p1, p2, lineStyle) {
+  if (lineStyle === "curved") {
+    const dx = p2.x - p1.x;
+    const c1x = p1.x + dx * 0.5;
+    const c1y = p1.y;
+    const c2x = p1.x + dx * 0.5;
+    const c2y = p2.y;
+    return `M ${p1.x} ${p1.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+  }
+  if (lineStyle === "orthogonal") {
+    const midX = p1.x + (p2.x - p1.x) / 2;
+    return `M ${p1.x} ${p1.y} L ${midX} ${p1.y} L ${midX} ${p2.y} L ${p2.x} ${p2.y}`;
+  }
+  // straight (default)
+  return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+}
+
 function renderConnector(conn) {
   const fromNode = state.nodes.find((n) => n.id === conn.from);
   const toNode = state.nodes.find((n) => n.id === conn.to);
@@ -310,38 +387,40 @@ function renderConnector(conn) {
   const fromC = nodeCenter(fromNode);
   const p1 = edgePoint(fromNode, toC.x, toC.y);
   const p2 = edgePoint(toNode, fromC.x, fromC.y);
+  const lineStyle = conn.lineStyle || "straight";
+  const d = buildConnectorPath(p1, p2, lineStyle);
 
   const isSelected = state.selection && state.selection.kind === "connector" && state.selection.id === conn.id;
 
   const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
 
-  // Wide invisible hit-line, easier to click than the thin visible line
-  const hitLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  hitLine.setAttribute("x1", p1.x);
-  hitLine.setAttribute("y1", p1.y);
-  hitLine.setAttribute("x2", p2.x);
-  hitLine.setAttribute("y2", p2.y);
-  hitLine.setAttribute("stroke", "transparent");
-  hitLine.setAttribute("stroke-width", "14");
-  hitLine.style.cursor = "pointer";
-  hitLine.addEventListener("click", (e) => {
+  // Wide invisible hit-path, easier to click than the thin visible line
+  const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  hitPath.setAttribute("d", d);
+  hitPath.setAttribute("fill", "none");
+  hitPath.setAttribute("stroke", "transparent");
+  hitPath.setAttribute("stroke-width", "14");
+  hitPath.style.cursor = "pointer";
+  hitPath.addEventListener("click", (e) => {
     e.stopPropagation();
     setSelection("connector", conn.id);
   });
-  g.appendChild(hitLine);
+  g.appendChild(hitPath);
 
-  const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-  line.setAttribute("x1", p1.x);
-  line.setAttribute("y1", p1.y);
-  line.setAttribute("x2", p2.x);
-  line.setAttribute("y2", p2.y);
-  line.setAttribute("stroke", isSelected ? "#ffffff" : "#d4ff3a");
-  line.setAttribute("stroke-width", isSelected ? "2.5" : "1.5");
-  line.setAttribute("marker-end", "url(#arrow-marker)");
-  line.style.pointerEvents = "none";
-  g.appendChild(line);
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", isSelected ? "#ffffff" : "#d4ff3a");
+  path.setAttribute("stroke-width", isSelected ? "2.5" : "1.5");
+  path.setAttribute("marker-end", "url(#arrow-marker)");
+  path.style.pointerEvents = "none";
+  g.appendChild(path);
 
   viewportEl.appendChild(g);
+
+  if (isSelected) {
+    positionConnectorToolbar(p1, p2);
+  }
 }
 
 function renderNode(node) {
@@ -538,7 +617,10 @@ function startConnector(fromNodeId, evt) {
     );
     tempLine.remove();
     if (target) {
-      state.connectors.push({ id: generateId("conn"), from: fromNodeId, to: target.id });
+      const newConn = { id: generateId("conn"), from: fromNodeId, to: target.id, lineStyle: "straight" };
+      state.connectors.push(newConn);
+      setSelection("connector", newConn.id);
+    } else {
       renderDiagram();
     }
     document.removeEventListener("mousemove", onMove);
@@ -554,6 +636,144 @@ function startConnector(fromNodeId, evt) {
 }
 
 // ----------------------------------------------------------------
+// Export to PNG (real file download)
+// ----------------------------------------------------------------
+
+/**
+ * Renders the diagram (nodes + connectors, ignoring current pan/zoom)
+ * to an off-screen SVG sized to fit the content, converts it to a PNG
+ * via canvas, and triggers a browser download.
+ */
+async function handleDownloadPng() {
+  if (state.nodes.length === 0) {
+    showToast("Add at least one box first");
+    return;
+  }
+
+  const PADDING = 40;
+  const bounds = state.nodes.reduce(
+    (acc, n) => ({
+      minX: Math.min(acc.minX, n.x),
+      minY: Math.min(acc.minY, n.y),
+      maxX: Math.max(acc.maxX, n.x + n.w),
+      maxY: Math.max(acc.maxY, n.y + n.h),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  );
+
+  const width = bounds.maxX - bounds.minX + PADDING * 2;
+  const height = bounds.maxY - bounds.minY + PADDING * 2;
+  const offsetX = PADDING - bounds.minX;
+  const offsetY = PADDING - bounds.minY;
+
+  const svgMarkup = buildExportSvg(width, height, offsetX, offsetY);
+
+  try {
+    const pngDataUrl = await svgStringToPngDataUrl(svgMarkup, width, height);
+    triggerDownload(pngDataUrl, `${sanitizeFilename(state.name)}.png`);
+    showToast("Downloaded");
+  } catch (err) {
+    showToast("Download failed — try Save instead");
+    console.error("PNG export failed:", err);
+  }
+}
+
+/** Builds a standalone SVG string (no pan/zoom transform) for export. */
+function buildExportSvg(width, height, offsetX, offsetY) {
+  const parts = [];
+  parts.push(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
+  );
+  parts.push(`<rect width="${width}" height="${height}" fill="#0c0b09"/>`);
+  parts.push(`<defs><marker id="export-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0, 9 4.5, 0 9" fill="#d4ff3a"/></marker></defs>`);
+  parts.push(`<g transform="translate(${offsetX} ${offsetY})">`);
+
+  state.connectors.forEach((conn) => {
+    const fromNode = state.nodes.find((n) => n.id === conn.from);
+    const toNode = state.nodes.find((n) => n.id === conn.to);
+    if (!fromNode || !toNode) return;
+    const toC = nodeCenter(toNode);
+    const fromC = nodeCenter(fromNode);
+    const p1 = edgePoint(fromNode, toC.x, toC.y);
+    const p2 = edgePoint(toNode, fromC.x, fromC.y);
+    const d = buildConnectorPath(p1, p2, conn.lineStyle || "straight");
+    parts.push(`<path d="${d}" fill="none" stroke="#d4ff3a" stroke-width="1.5" marker-end="url(#export-arrow)"/>`);
+  });
+
+  state.nodes.forEach((node) => {
+    parts.push(exportShapeMarkup(node));
+    parts.push(
+      `<text x="${node.x + node.w / 2}" y="${node.y + node.h / 2 + 4}" text-anchor="middle" fill="#f4f2ea" font-size="12.5" font-family="JetBrains Mono, monospace">${escapeXml(node.label)}</text>`
+    );
+  });
+
+  parts.push("</g></svg>");
+  return parts.join("");
+}
+
+function exportShapeMarkup(node) {
+  const stroke = "#d4ff3a";
+  if (node.type === "ellipse") {
+    return `<ellipse cx="${node.x + node.w / 2}" cy="${node.y + node.h / 2}" rx="${node.w / 2}" ry="${node.h / 2}" fill="#0a0907" stroke="${stroke}" stroke-width="1.5"/>`;
+  }
+  if (node.type === "diamond") {
+    const cx = node.x + node.w / 2;
+    const cy = node.y + node.h / 2;
+    const points = `${cx},${node.y} ${node.x + node.w},${cy} ${cx},${node.y + node.h} ${node.x},${cy}`;
+    return `<polygon points="${points}" fill="#0a0907" stroke="${stroke}" stroke-width="1.5"/>`;
+  }
+  const rx = node.type === "rounded" ? 18 : 6;
+  return `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="${rx}" fill="#0a0907" stroke="${stroke}" stroke-width="1.5"/>`;
+}
+
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Rasterizes an SVG string to a PNG data URL via an off-screen canvas. */
+function svgStringToPngDataUrl(svgString, width, height) {
+  return new Promise((resolve, reject) => {
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+
+    img.onload = () => {
+      const scale = 2; // export at 2x for crisper output
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(url);
+      reject(err);
+    };
+    img.src = url;
+  });
+}
+
+function triggerDownload(dataUrl, filename) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function sanitizeFilename(name) {
+  return (name || "diagram").trim().replace(/[^a-z0-9_\-]+/gi, "_") || "diagram";
+}
+
+// ----------------------------------------------------------------
 // Persistence
 // ----------------------------------------------------------------
 
@@ -562,7 +782,7 @@ async function handleSave() {
     id: state.diagramId,
     name: state.name,
     nodes: state.nodes.map(({ id, type, label, x, y, w, h }) => ({ id, type, label, x, y, w, h })),
-    connectors: state.connectors.map(({ id, from, to }) => ({ id, from, to })),
+    connectors: state.connectors.map(({ id, from, to, lineStyle }) => ({ id, from, to, lineStyle: lineStyle || "straight" })),
     meta: {},
   };
 

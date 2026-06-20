@@ -91,15 +91,16 @@ Go to **Settings** in the app to add a Groq, Cerebras, or Mistral API key. This 
 
 ## What's built so far
 
-- **Create Diagram (v2)** — shape palette (box, circle, decision, process), drag nodes to position, drag from edge handles to connect nodes, click to select + delete, double-click to rename, zoom (wheel or buttons) and pan (drag empty canvas), save/load
+- **Create Diagram (v2.1)** — shape palette (box, circle, decision, process), drag nodes to position, drag from edge handles to connect nodes, click to select + delete, double-click to rename, zoom (wheel or buttons) and pan (drag empty canvas), save/load, **connector line-style picker** (straight / curved / right-angle, appears as a floating toolbar when a connector is selected — like draw.io), **Download as PNG**
 - **Analyze Diagram (v2)** — upload an image, choose one of three explanation styles (step-by-step, real-world example, suggestions) via toggle buttons, each generated on demand and cached per upload, write your own if no API key is set
-- **Settings** — API key config, install button, export/import all data as JSON
+- **Settings** — API key config (now masked as a password field with a Show/Hide toggle), install button, export/import all data as JSON
 - **Storage** — IndexedDB wrapper with three stores: diagrams, analyses, settings
 - **PWA shell** — manifest, service worker, offline caching, installable on both platforms
 
 ## What's not built yet (future iterations)
 
+- Full shape library (draw.io's palette has 30+ shapes — this app currently has 4: box, circle, decision, process)
+- Connector labels (text on the line itself) and re-routing an existing connector's endpoints
 - Pre-fetching all three explanation styles at once on upload (currently generated on-demand per tab click, to limit API calls)
 - Multi-select, copy/paste, undo/redo in the diagram editor
-- Connector labels and re-routing an existing connector's endpoints
 - Any additional modules beyond Create / Analyze / Settings

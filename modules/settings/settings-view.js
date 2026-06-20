@@ -63,7 +63,10 @@ async function render() {
         <option value="cerebras" ${provider === "cerebras" ? "selected" : ""}>Cerebras</option>
         <option value="mistral" ${provider === "mistral" ? "selected" : ""}>Mistral</option>
       </select>
-      <input type="text" id="api-key-input" placeholder="API key" value="${apiKey ? escapeHtml(apiKey) : ""}" class="mt-1" />
+      <div style="position:relative;">
+        <input type="password" id="api-key-input" placeholder="API key" value="${apiKey ? escapeHtml(apiKey) : ""}" class="mt-1" style="padding-right:60px;" />
+        <button type="button" id="toggle-key-visibility" class="btn" style="position:absolute; right:4px; top:50%; transform:translateY(-50%); padding:4px 10px; font-size:11px; border:none;">Show</button>
+      </div>
       <div class="flex gap-1 mt-2">
         <button class="btn btn-primary" id="save-api-btn">Save</button>
         <button class="btn btn-danger" id="clear-api-btn">Clear</button>
@@ -89,6 +92,7 @@ async function render() {
   document.getElementById("clear-api-btn").addEventListener("click", handleClearApi);
   document.getElementById("export-btn").addEventListener("click", handleExport);
   document.getElementById("import-input").addEventListener("change", handleImport);
+  document.getElementById("toggle-key-visibility").addEventListener("click", toggleKeyVisibility);
 
   const installBtn = document.getElementById("install-app-btn");
   if (installBtn) {
@@ -99,6 +103,14 @@ async function render() {
       }
     });
   }
+}
+
+function toggleKeyVisibility() {
+  const input = document.getElementById("api-key-input");
+  const btn = document.getElementById("toggle-key-visibility");
+  const isHidden = input.type === "password";
+  input.type = isHidden ? "text" : "password";
+  btn.textContent = isHidden ? "Hide" : "Show";
 }
 
 async function handleSaveApi() {
