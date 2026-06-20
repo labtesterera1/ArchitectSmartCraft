@@ -51,6 +51,14 @@ const LINE_STYLES = [
   { key: "orthogonal",  label: "Right-angle", icon: `<path d="M4 19V12H20V5"/>` },
 ];
 
+const ARROW_TYPES = [
+  { key: "none",     label: "None",          icon: `<line x1="4" y1="12" x2="20" y2="12"/>` },
+  { key: "arrow",    label: "Arrow",         icon: `<line x1="4" y1="12" x2="18" y2="12"/><path d="M14 8l5 4-5 4"/>` },
+  { key: "filled",   label: "Filled arrow",  icon: `<line x1="4" y1="12" x2="16" y2="12"/><polygon points="14,8 20,12 14,16"/>` },
+  { key: "diamond",  label: "Diamond",       icon: `<line x1="4" y1="12" x2="14" y2="12"/><polygon points="14,12 17,9 20,12 17,15"/>` },
+  { key: "circle",   label: "Circle",        icon: `<line x1="4" y1="12" x2="16" y2="12"/><circle cx="18" cy="12" r="3"/>` },
+];
+
 const GRID_SIZE = 20;
 const HANDLE_R  = 6;
 const MIN_ZOOM  = 0.2;
@@ -108,9 +116,20 @@ function buildShell(container) {
           <pattern id="grid" width="${GRID_SIZE}" height="${GRID_SIZE}" patternUnits="userSpaceOnUse">
             <path d="M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}" fill="none" stroke="rgba(212,255,58,0.06)" stroke-width="0.5"/>
           </pattern>
-          <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-            <polygon points="0 0,9 4.5,0 9" fill="#d4ff3a"/>
-          </marker>
+          <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#d4ff3a"/></marker>
+          <marker id="ah-w" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#fff"/></marker>
+          <marker id="ah-filled" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#d4ff3a"/></marker>
+          <marker id="ah-filled-w" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#fff"/></marker>
+          <marker id="ah-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="#d4ff3a"/></marker>
+          <marker id="ah-diamond-w" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="#fff"/></marker>
+          <marker id="ah-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="#d4ff3a"/></marker>
+          <marker id="ah-circle-w" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="#fff"/></marker>
+          <marker id="ah-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="#d4ff3a" stroke-width="1.5"/></marker>
+          <marker id="ah-arrow-w" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="#fff" stroke-width="1.5"/></marker>
+          <marker id="ah-s-arrow" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><path d="M9 0L0 4.5L9 9" fill="none" stroke="#d4ff3a" stroke-width="1.5"/></marker>
+          <marker id="ah-s-filled" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><polygon points="9 0,0 4.5,9 9" fill="#d4ff3a"/></marker>
+          <marker id="ah-s-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><polygon points="0,5 5,0 10,5 5,10" fill="#d4ff3a"/></marker>
+          <marker id="ah-s-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><circle cx="4" cy="4" r="3" fill="#d4ff3a"/></marker>
         </defs>
         <rect id="dd-grid-bg" width="9999" height="9999" fill="url(#grid)"/>
         <g id="dd-vp"></g>
@@ -448,8 +467,10 @@ function drawNode(node) {
   txt.setAttribute("x", node.x + node.w/2);
   txt.setAttribute("y", node.y + node.h/2 + 5);
   txt.setAttribute("text-anchor", "middle");
-  txt.setAttribute("fill", lightOrDark(fill) === "dark" ? "#f4f2ea" : "#0c0b09");
-  txt.setAttribute("font-size", "12");
+  const fontSize = node.fontSize || 12;
+  const textColor = node.textColor || (lightOrDark(fill) === "dark" ? "#f4f2ea" : "#0c0b09");
+  txt.setAttribute("fill", textColor);
+  txt.setAttribute("font-size", fontSize);
   txt.setAttribute("font-family", "JetBrains Mono,monospace");
   txt.style.pointerEvents = "none";
   txt.textContent = node.label;
@@ -467,7 +488,8 @@ function drawNode(node) {
       dot.addEventListener("touchstart", e => { e.stopPropagation(); startConnect(node.id, e); }, {passive:true});
       g.appendChild(dot);
     });
-    showNodeFloat(node);
+    // show text formatting float only for text nodes
+    if (node.type === "text") showTextFloat(node);
   }
 
   // interactions
@@ -505,6 +527,34 @@ function showNodeFloat(node) {
     e.stopPropagation(); snap(); node.fill = b.dataset.nclr||null; draw();
   }));
 }
+
+/** Shows font size +/- and text color controls when a text node is selected. */
+function showTextFloat(node) {
+  const x = (node.x + node.w/2) * S.zoom + S.pan.x;
+  const y = node.y * S.zoom + S.pan.y;
+  el.float.style.left = x+"px"; el.float.style.top = y+"px";
+  el.float.classList.remove("hidden");
+  const sz = node.fontSize || 12;
+  el.float.innerHTML = `
+    <button data-txact="minus" class="btn" style="padding:3px 7px;font-size:12px;line-height:1;border:none" title="Decrease font">A-</button>
+    <span style="font-size:11px;color:var(--color-text);min-width:28px;text-align:center">${sz}px</span>
+    <button data-txact="plus" class="btn" style="padding:3px 7px;font-size:12px;line-height:1;border:none" title="Increase font">A+</button>
+    <div style="width:1px;background:var(--color-border);margin:0 3px"></div>
+    ${COLORS.slice(0,7).map(c => {
+      const active = (node.textColor||"") === c.key;
+      return `<button data-txclr="${c.key}" style="width:16px;height:16px;border-radius:50%;background:${c.hex};border:2px solid ${active?"#fff":"rgba(255,255,255,.2)"};padding:0;cursor:pointer" title="${c.label}"></button>`;
+    }).join("")}
+  `;
+  el.float.querySelector('[data-txact="minus"]').addEventListener("click", e => {
+    e.stopPropagation(); snap(); node.fontSize = Math.max(8, sz - 2); draw();
+  });
+  el.float.querySelector('[data-txact="plus"]').addEventListener("click", e => {
+    e.stopPropagation(); snap(); node.fontSize = Math.min(48, sz + 2); draw();
+  });
+  el.float.querySelectorAll("[data-txclr]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); snap(); node.textColor = b.dataset.txclr || null; draw();
+  }));
+}
 function hideFloat() { el.float && el.float.classList.add("hidden"); }
 
 // ================================================================
@@ -539,7 +589,11 @@ function drawConn(conn) {
   line.setAttribute("d", d); line.setAttribute("fill", "none");
   line.setAttribute("stroke", isSel ? "#fff" : "#d4ff3a");
   line.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
-  line.setAttribute("marker-end", "url(#ah)");
+  const endArrow = conn.endArrow || "filled";
+  const startArrow = conn.startArrow || "none";
+  const suffix = isSel ? "-w" : "";
+  if (endArrow !== "none") line.setAttribute("marker-end", `url(#ah-${endArrow}${suffix})`);
+  if (startArrow !== "none") line.setAttribute("marker-start", `url(#ah-s-${startArrow})`);
   line.style.pointerEvents = "none";
   g.appendChild(line);
 
@@ -558,12 +612,44 @@ function showConnFloat(p1, p2, conn) {
   const my = (p1.y+p2.y)/2*S.zoom+S.pan.y;
   el.float.style.left = mx+"px"; el.float.style.top = my+"px";
   el.float.classList.remove("hidden");
-  el.float.innerHTML = LINE_STYLES.map(ls =>
-    `<button class="btn${(conn.style||"straight")===ls.key?" btn-primary":""}" data-fls="${ls.key}" style="padding:4px 8px;font-size:11px;border:none" title="${ls.label}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">${ls.icon}</svg></button>`
-  ).join("");
+
+  const curStyle = conn.style || "straight";
+  const curEnd = conn.endArrow || "filled";
+  const curStart = conn.startArrow || "none";
+
+  el.float.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;gap:2px">
+        ${LINE_STYLES.map(ls =>
+          `<button class="btn${curStyle===ls.key?" btn-primary":""}" data-fls="${ls.key}" style="padding:3px 6px;font-size:10px;border:none;line-height:0" title="${ls.label}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">${ls.icon}</svg></button>`
+        ).join("")}
+      </div>
+      <div style="display:flex;gap:2px;align-items:center">
+        <span style="font-size:9px;color:var(--color-text-tertiary);width:28px">Start</span>
+        ${ARROW_TYPES.map(at =>
+          `<button class="btn${curStart===at.key?" btn-primary":""}" data-fsa="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
+        ).join("")}
+      </div>
+      <div style="display:flex;gap:2px;align-items:center">
+        <span style="font-size:9px;color:var(--color-text-tertiary);width:28px">End</span>
+        ${ARROW_TYPES.map(at =>
+          `<button class="btn${curEnd===at.key?" btn-primary":""}" data-fea="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
+        ).join("")}
+      </div>
+    </div>
+  `;
+
   el.float.querySelectorAll("[data-fls]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation(); snap(); conn.style = b.dataset.fls; draw();
+  }));
+  el.float.querySelectorAll("[data-fsa]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); snap(); conn.startArrow = b.dataset.fsa; draw();
+  }));
+  el.float.querySelectorAll("[data-fea]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); snap(); conn.endArrow = b.dataset.fea; draw();
   }));
 }
 
@@ -666,7 +752,7 @@ function startConnect(fromId, evt) {
     tmp.remove();
     if (target) {
       snap();
-      const nc = {id:uid("c"), from:fromId, to:target.id, style:S.lineStyle, wp:[]};
+      const nc = {id:uid("c"), from:fromId, to:target.id, style:S.lineStyle, wp:[], startArrow:"none", endArrow:"filled"};
       S.conns.push(nc);
       setSel({k:"conn", id:nc.id});
     }
@@ -757,7 +843,15 @@ async function downloadPng() {
   const ox=PAD-b.minX, oy=PAD-b.minY;
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`;
   svg += `<rect width="${w}" height="${h}" fill="#0c0b09"/>`;
-  svg += `<defs><marker id="ea" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#d4ff3a"/></marker></defs>`;
+  svg += `<defs><marker id="ea" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#d4ff3a"/></marker>`;
+  svg += `<marker id="ea-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="#d4ff3a" stroke-width="1.5"/></marker>`;
+  svg += `<marker id="ea-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="#d4ff3a"/></marker>`;
+  svg += `<marker id="ea-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="#d4ff3a"/></marker>`;
+  svg += `<marker id="es-arrow" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><path d="M9 0L0 4.5L9 9" fill="none" stroke="#d4ff3a" stroke-width="1.5"/></marker>`;
+  svg += `<marker id="es-filled" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><polygon points="9 0,0 4.5,9 9" fill="#d4ff3a"/></marker>`;
+  svg += `<marker id="es-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><polygon points="0,5 5,0 10,5 5,10" fill="#d4ff3a"/></marker>`;
+  svg += `<marker id="es-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><circle cx="4" cy="4" r="3" fill="#d4ff3a"/></marker>`;
+  svg += `</defs>`;
   svg += `<g transform="translate(${ox},${oy})">`;
 
   S.conns.forEach(c => {
@@ -766,15 +860,22 @@ async function downloadPng() {
     const wp=c.wp||[];
     const a2=wp.length?wp[0]:center(tn), af=wp.length?wp[wp.length-1]:center(fn);
     const p1=edgePt(fn,a2.x,a2.y), p2=edgePt(tn,af.x,af.y);
-    svg += `<path d="${buildPath(p1,p2,c.style||"straight",wp)}" fill="none" stroke="#d4ff3a" stroke-width="1.5" marker-end="url(#ea)"/>`;
+    let markers = "";
+    const endA = c.endArrow || "filled";
+    const startA = c.startArrow || "none";
+    if (endA === "filled") markers += ` marker-end="url(#ea)"`;
+    else if (endA !== "none") markers += ` marker-end="url(#ea-${endA})"`;
+    if (startA !== "none") markers += ` marker-start="url(#es-${startA})"`;
+    svg += `<path d="${buildPath(p1,p2,c.style||"straight",wp)}" fill="none" stroke="#d4ff3a" stroke-width="1.5"${markers}/>`;
   });
 
   S.nodes.forEach(n => {
     const fill = n.type==="text"?"transparent":(n.fill||"#0a0907");
     const stroke = n.type==="text"?"none":"#d4ff3a";
     svg += shapeToSvgStr(n, fill, stroke);
-    const tc = lightOrDark(fill)==="dark"?"#f4f2ea":"#0c0b09";
-    svg += `<text x="${n.x+n.w/2}" y="${n.y+n.h/2+5}" text-anchor="middle" fill="${tc}" font-size="12" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    const fontSize = n.fontSize || 12;
+    const tc = n.textColor || (lightOrDark(fill)==="dark"?"#f4f2ea":"#0c0b09");
+    svg += `<text x="${n.x+n.w/2}" y="${n.y+n.h/2+5}" text-anchor="middle" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
   });
 
   svg += "</g></svg>";
@@ -815,8 +916,8 @@ function shapeToSvgStr(node, fill, stroke) {
 async function save() {
   const saved = await storage.diagrams.save({
     id: S.id, name: S.name,
-    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill})=>({id,type,label,x,y,w,h,fill})),
-    connectors: S.conns.map(({id,from,to,style,wp})=>({id,from,to,style,wp:wp||[]})),
+    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null})),
+    connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled"})),
   });
   S.id = saved.id;
   toast("Saved"); loadSavedList();
