@@ -91,16 +91,16 @@ Go to **Settings** in the app to add a Groq, Cerebras, or Mistral API key. This 
 
 ## What's built so far
 
-- **Create Diagram (v3)** — real icon-based top toolbar (zoom in/out, undo/redo, delete, download PNG — matches a standard diagram editor's layout) and an icon-tile shape palette panel beside the canvas (box, process, circle, decision), drag nodes to position, drag from edge handles to connect nodes, click to select + delete, double-click to rename, undo/redo history, scroll to zoom + drag to pan (double-click the zoom indicator to reset), connector line-style picker (straight / curved / right-angle — floating toolbar on a selected connector), save/load, **Download as PNG**
-- **Analyze Diagram (v2)** — upload an image, choose one of three explanation styles (step-by-step, real-world example, suggestions) via toggle buttons, each generated on demand and cached per upload, write your own if no API key is set
+- **Create Diagram (v4)** — real icon-based top toolbar (zoom in/out, fit-to-view, undo/redo, delete, download PNG) and an icon-tile shape palette beside the canvas with **13 shapes** (box, process, circle, decision, triangle, database/cylinder, hexagon, input/output parallelogram, cloud, callout, actor/person, document, text), drag nodes to position, drag from edge handles to connect nodes, **fill color picker** (7 swatches, appears as a floating toolbar on a selected node), **waypoints** — double-click/double-tap a connector to add a routing point, drag it to reshape the line, double-click/double-tap a waypoint to remove it, click to select + delete, double-click/double-tap to rename, undo/redo history, scroll to zoom + drag to pan, connector line-style picker (straight / curved / right-angle), save/load, Download as PNG (waypoints and fill colors included in the exported image)
+- **Analyze Diagram (v2)** — upload an image, choose one of three explanation styles (step-by-step, real-world example, suggestions) via toggle buttons, each generated on demand and cached per upload, **works fully without an API key** — write your own explanation manually any time
 - **Settings** — API key config (masked as a password field with a Show/Hide toggle), install button, export/import all data as JSON
 - **Storage** — IndexedDB wrapper with three stores: diagrams, analyses, settings
 - **PWA shell** — manifest, service worker, offline caching, installable on both platforms
 
 ## What's not built yet (future iterations)
 
-- Full shape library (draw.io's palette has 30+ shapes — this app currently has 4: box, process, circle, decision)
-- Connector labels (text on the line itself) and re-routing an existing connector's endpoints
-- Pre-fetching all three explanation styles at once on upload (currently generated on-demand per tab click, to limit API calls)
+- Connector labels (text on the line itself)
 - Multi-select, copy/paste in the diagram editor
+- Snapping/alignment guides
+- Custom color picker beyond the 7 preset swatches
 - Any additional modules beyond Create / Analyze / Settings

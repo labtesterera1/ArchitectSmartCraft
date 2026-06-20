@@ -25,6 +25,15 @@ const SHAPE_TYPES = [
   { type: "rounded", label: "Process", w: 120, h: 56 },
   { type: "ellipse", label: "Circle", w: 100, h: 70 },
   { type: "diamond", label: "Decision", w: 120, h: 80 },
+  { type: "triangle", label: "Triangle", w: 90, h: 80 },
+  { type: "cylinder", label: "Database", w: 90, h: 80 },
+  { type: "hexagon", label: "Hexagon", w: 120, h: 64 },
+  { type: "parallelogram", label: "Input/Output", w: 120, h: 60 },
+  { type: "cloud", label: "Cloud", w: 120, h: 76 },
+  { type: "callout", label: "Callout", w: 120, h: 70 },
+  { type: "person", label: "Actor", w: 60, h: 90 },
+  { type: "document", label: "Document", w: 110, h: 70 },
+  { type: "text", label: "Text", w: 90, h: 30 },
 ];
 
 /** Small SVG icon glyphs (24x24 viewBox) for palette tiles — drawn as outline shapes, matching the canvas style. */
@@ -33,6 +42,15 @@ const SHAPE_ICONS = {
   rounded: `<rect x="3" y="6" width="18" height="12" rx="6"/>`,
   ellipse: `<ellipse cx="12" cy="12" rx="9" ry="6.5"/>`,
   diamond: `<polygon points="12,3 21,12 12,21 3,12"/>`,
+  triangle: `<polygon points="12,4 21,20 3,20"/>`,
+  cylinder: `<path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3v10c0 1.7-3.6 3-8 3s-8-1.3-8-3z"/><ellipse cx="12" cy="7" rx="8" ry="3"/>`,
+  hexagon: `<polygon points="7,4 17,4 21,12 17,20 7,20 3,12"/>`,
+  parallelogram: `<polygon points="7,6 21,6 17,18 3,18"/>`,
+  cloud: `<path d="M6 17a4 4 0 0 1-1-7.9 5 5 0 0 1 9.6-2A4.5 4.5 0 0 1 18 16.5a3.5 3.5 0 0 1-.5.5z"/>`,
+  callout: `<path d="M3 5h18v10H9l-4 4v-4H3z"/>`,
+  person: `<circle cx="12" cy="6" r="3"/><path d="M6 21v-3a6 6 0 0 1 12 0v3"/>`,
+  document: `<path d="M4 4h16v13c-2 0-2 2-4 2s-2-2-4-2-2 2-4 2-2-2-4-2z"/>`,
+  text: `<line x1="5" y1="6" x2="19" y2="6"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="18" x2="13" y2="18"/>`,
 };
 
 /** Toolbar icon glyphs (24x24 viewBox), stroke-based, matching draw.io's compact icon strip. */
@@ -44,12 +62,24 @@ const TOOLBAR_ICONS = {
   trash: `<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>`,
   download: `<path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M5 19h14"/>`,
   save: `<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v6h8V4"/><path d="M8 14h8v6H8z"/>`,
+  fitToView: `<path d="M4 9V5a1 1 0 0 1 1-1h4"/><path d="M20 9V5a1 1 0 0 0-1-1h-4"/><path d="M4 15v4a1 1 0 0 0 1 1h4"/><path d="M20 15v4a1 1 0 0 1-1 1h-4"/>`,
 };
 
 const LINE_STYLES = [
   { key: "straight", label: "Straight" },
   { key: "curved", label: "Curved" },
   { key: "orthogonal", label: "Right angle" },
+];
+
+/** Fill color swatches offered when a node is selected. First entry is "no fill override" (uses the default dark fill). */
+const NODE_COLORS = [
+  { key: "", swatch: "#0a0907", label: "Default" },
+  { key: "#d4ff3a", swatch: "#d4ff3a", label: "Lime" },
+  { key: "#4ee08a", swatch: "#4ee08a", label: "Green" },
+  { key: "#5ab8ff", swatch: "#5ab8ff", label: "Blue" },
+  { key: "#ff8a5c", swatch: "#ff8a5c", label: "Orange" },
+  { key: "#ff5a4e", swatch: "#ff5a4e", label: "Red" },
+  { key: "#c98fff", swatch: "#c98fff", label: "Purple" },
 ];
 
 const HANDLE_R = 5;
@@ -81,6 +111,8 @@ function freshState() {
 export function initCreateDiagramView(container) {
   containerEl = container;
   state = freshState();
+  lastTapByNodeId = {};
+  lastTapByConnId = {};
   render();
 }
 
@@ -144,13 +176,13 @@ function render() {
 
     <div id="icon-toolbar" class="flex gap-1" style="background: var(--color-bg-raised); border:1px solid var(--color-border); border-radius: var(--radius-md); padding:6px; margin-bottom:10px; flex-wrap:wrap;"></div>
 
-    <div style="display:flex; gap:10px; align-items:stretch;">
-      <div class="panel" id="shape-palette-wrap" style="padding:10px; width:108px; flex-shrink:0;">
+    <div style="display:flex; gap:10px; align-items:stretch; width:100%; min-width:0;">
+      <div class="panel" id="shape-palette-wrap" style="padding:10px; width:108px; flex-shrink:0; height:420px; overflow-y:auto;">
         <span class="label" style="margin-bottom:10px;">Shapes</span>
         <div id="shape-palette" style="display:grid; grid-template-columns:1fr 1fr; gap:6px;"></div>
       </div>
 
-      <div class="panel corner-frame" id="canvas-wrap" style="position:relative; padding:0; overflow:hidden; height:420px; flex:1; touch-action:none;">
+      <div class="panel corner-frame" id="canvas-wrap" style="position:relative; padding:0; overflow:hidden; height:420px; flex:1; min-width:0; touch-action:none;">
         <svg id="diagram-svg" width="100%" height="100%" style="display:block; cursor:grab;">
           <defs>
             <marker id="arrow-marker" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
@@ -204,6 +236,7 @@ function renderIconToolbar() {
   toolbar.innerHTML = [
     iconButton("zoom-out-toolbar-btn", TOOLBAR_ICONS.zoomOut, "Zoom out"),
     iconButton("zoom-in-toolbar-btn", TOOLBAR_ICONS.zoomIn, "Zoom in"),
+    iconButton("fit-view-btn", TOOLBAR_ICONS.fitToView, "Fit all shapes in view"),
     spacer(),
     iconButton("undo-btn", TOOLBAR_ICONS.undo, "Undo", !state.undoStack || state.undoStack.length === 0),
     iconButton("redo-btn", TOOLBAR_ICONS.redo, "Redo", !state.redoStack || state.redoStack.length === 0),
@@ -215,6 +248,7 @@ function renderIconToolbar() {
 
   document.getElementById("zoom-in-toolbar-btn").addEventListener("click", () => zoomBy(1.2));
   document.getElementById("zoom-out-toolbar-btn").addEventListener("click", () => zoomBy(1 / 1.2));
+  document.getElementById("fit-view-btn").addEventListener("click", resetView);
   document.getElementById("delete-selected-btn").addEventListener("click", deleteSelection);
   document.getElementById("download-png-btn").addEventListener("click", handleDownloadPng);
   document.getElementById("undo-btn").addEventListener("click", undo);
@@ -248,12 +282,21 @@ function addShape(type) {
   snapshot();
   const def = SHAPE_TYPES.find((s) => s.type === type);
   const count = state.nodes.length;
+
+  // Figure out how much canvas is actually visible right now (in diagram coords),
+  // so new shapes always land somewhere the user can see — not at a fixed pixel
+  // offset that may sit outside a narrow screen's visible area.
+  const visible = getVisibleDiagramBounds();
+  const cols = Math.max(1, Math.floor((visible.width - 40) / 140));
+  const col = count % cols;
+  const row = Math.floor(count / cols);
+
   const node = {
     id: generateId("node"),
     type,
     label: def.label,
-    x: 40 + (count % 4) * 140,
-    y: 30 + Math.floor(count / 4) * 110,
+    x: visible.x + 30 + col * 140,
+    y: visible.y + 24 + row * 100,
     w: def.w,
     h: def.h,
   };
@@ -280,14 +323,58 @@ function zoomBy(factor) {
   const newScale = clamp(state.scale * factor, MIN_SCALE, MAX_SCALE);
   state.scale = newScale;
   applyViewportTransform();
-  if (state.selection && state.selection.kind === "connector") renderDiagram();
+  if (state.selection && (state.selection.kind === "connector" || state.selection.kind === "node")) renderDiagram();
 }
 
+/** Computes the bounding box of all nodes AND any connector waypoints, so fit-to-view and PNG export never clip a dragged-out waypoint. */
+function computeContentBounds() {
+  const bounds = state.nodes.reduce(
+    (acc, n) => ({
+      minX: Math.min(acc.minX, n.x),
+      minY: Math.min(acc.minY, n.y),
+      maxX: Math.max(acc.maxX, n.x + n.w),
+      maxY: Math.max(acc.maxY, n.y + n.h),
+    }),
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+  );
+
+  state.connectors.forEach((conn) => {
+    (conn.waypoints || []).forEach((wp) => {
+      bounds.minX = Math.min(bounds.minX, wp.x);
+      bounds.minY = Math.min(bounds.minY, wp.y);
+      bounds.maxX = Math.max(bounds.maxX, wp.x);
+      bounds.maxY = Math.max(bounds.maxY, wp.y);
+    });
+  });
+
+  return bounds;
+}
+
+/** Resets pan/zoom so every node is visible — "zoom to fit" rather than a fixed reset point, since a diagram saved on a wide screen may have nodes off-screen on a narrow one. */
 function resetView() {
-  state.scale = 1;
-  state.pan = { x: 60, y: 40 };
+  if (state.nodes.length === 0) {
+    state.scale = 1;
+    state.pan = { x: 60, y: 40 };
+    applyViewportTransform();
+    return;
+  }
+
+  const PADDING = 40;
+  const bounds = computeContentBounds();
+
+  const contentWidth = bounds.maxX - bounds.minX + PADDING * 2;
+  const contentHeight = bounds.maxY - bounds.minY + PADDING * 2;
+  const rect = svgEl.getBoundingClientRect();
+
+  const scaleToFit = Math.min(rect.width / contentWidth, rect.height / contentHeight, MAX_SCALE);
+  state.scale = clamp(scaleToFit, MIN_SCALE, MAX_SCALE);
+  state.pan = {
+    x: -bounds.minX * state.scale + PADDING * state.scale,
+    y: -bounds.minY * state.scale + PADDING * state.scale,
+  };
+
   applyViewportTransform();
-  if (state.selection && state.selection.kind === "connector") renderDiagram();
+  if (state.selection && (state.selection.kind === "connector" || state.selection.kind === "node")) renderDiagram();
 }
 
 function clamp(v, min, max) {
@@ -303,6 +390,22 @@ function svgPointFromEvent(evt) {
   return {
     x: (sx - state.pan.x) / state.scale,
     y: (sy - state.pan.y) / state.scale,
+  };
+}
+
+/**
+ * Returns the currently-visible canvas area expressed in diagram
+ * coordinates (accounting for the SVG's actual rendered pixel size,
+ * current pan, and current zoom). Used to place new shapes somewhere
+ * the user can actually see, regardless of screen width.
+ */
+function getVisibleDiagramBounds() {
+  const rect = svgEl.getBoundingClientRect();
+  return {
+    x: -state.pan.x / state.scale,
+    y: -state.pan.y / state.scale,
+    width: rect.width / state.scale,
+    height: rect.height / state.scale,
   };
 }
 
@@ -347,7 +450,7 @@ function startPan(evt) {
   const onUp = () => {
     state.panning = null;
     svgEl.style.cursor = "grab";
-    if (state.selection && state.selection.kind === "connector") renderDiagram();
+    if (state.selection && (state.selection.kind === "connector" || state.selection.kind === "node")) renderDiagram();
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
     document.removeEventListener("touchmove", onMove);
@@ -367,7 +470,7 @@ function setSelection(kind, id) {
   state.selection = kind ? { kind, id } : null;
   const delBtn = document.getElementById("delete-selected-btn");
   if (delBtn) delBtn.disabled = !state.selection;
-  if (kind !== "connector") hideConnectorToolbar();
+  if (!kind) hideConnectorToolbar();
   renderDiagram();
 }
 
@@ -378,8 +481,10 @@ function deleteSelection() {
     const id = state.selection.id;
     state.nodes = state.nodes.filter((n) => n.id !== id);
     state.connectors = state.connectors.filter((c) => c.from !== id && c.to !== id);
+    delete lastTapByNodeId[id];
   } else if (state.selection.kind === "connector") {
     state.connectors = state.connectors.filter((c) => c.id !== state.selection.id);
+    delete lastTapByConnId[state.selection.id];
   }
   setSelection(null, null);
   renderIconToolbar();
@@ -432,6 +537,34 @@ function positionConnectorToolbar(p1, p2) {
   });
 }
 
+/** Shows a small floating color-swatch toolbar above the selected node, same visual pattern as the connector line-style toolbar. */
+function positionNodeColorToolbar(node) {
+  const toolbar = document.getElementById("connector-toolbar");
+  if (!toolbar) return;
+
+  const screenX = (node.x + node.w / 2) * state.scale + state.pan.x;
+  const screenY = node.y * state.scale + state.pan.y;
+
+  toolbar.style.left = `${screenX}px`;
+  toolbar.style.top = `${screenY}px`;
+  toolbar.classList.remove("hidden");
+
+  toolbar.innerHTML = NODE_COLORS.map((c) => {
+    const isActive = (node.fillColor || "") === c.key;
+    return `<button class="swatch-btn" data-color="${c.key}" title="${c.label}"
+      style="width:20px; height:20px; border-radius:50%; background:${c.swatch}; border:2px solid ${isActive ? "#ffffff" : "rgba(255,255,255,0.25)"}; padding:0; cursor:pointer;"></button>`;
+  }).join("");
+
+  toolbar.querySelectorAll("[data-color]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      snapshot();
+      node.fillColor = btn.dataset.color || null;
+      renderDiagram();
+    });
+  });
+}
+
 function lineStyleIcon(key) {
   if (key === "curved") return "&#x2937;";
   if (key === "orthogonal") return "&#x231F;";
@@ -464,21 +597,34 @@ function edgePoint(node, targetX, targetY) {
 }
 
 /** Builds an SVG path "d" string for a connector between two edge points, based on line style. */
-function buildConnectorPath(p1, p2, lineStyle) {
+/** Builds an SVG path "d" string for a connector, routing through any waypoints in order. */
+function buildConnectorPath(p1, p2, lineStyle, waypoints) {
+  const points = [p1, ...(waypoints || []), p2];
+
   if (lineStyle === "curved") {
-    const dx = p2.x - p1.x;
-    const c1x = p1.x + dx * 0.5;
-    const c1y = p1.y;
-    const c2x = p1.x + dx * 0.5;
-    const c2y = p2.y;
-    return `M ${p1.x} ${p1.y} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const dx = b.x - a.x;
+      d += ` C ${a.x + dx * 0.5} ${a.y}, ${a.x + dx * 0.5} ${b.y}, ${b.x} ${b.y}`;
+    }
+    return d;
   }
+
   if (lineStyle === "orthogonal") {
-    const midX = p1.x + (p2.x - p1.x) / 2;
-    return `M ${p1.x} ${p1.y} L ${midX} ${p1.y} L ${midX} ${p2.y} L ${p2.x} ${p2.y}`;
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const midX = a.x + (b.x - a.x) / 2;
+      d += ` L ${midX} ${a.y} L ${midX} ${b.y} L ${b.x} ${b.y}`;
+    }
+    return d;
   }
-  // straight (default)
-  return `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+
+  // straight (default) — also used as the basis for "straight-through-waypoints"
+  return `M ${points[0].x} ${points[0].y} ` + points.slice(1).map((p) => `L ${p.x} ${p.y}`).join(" ");
 }
 
 function renderConnector(conn) {
@@ -488,16 +634,20 @@ function renderConnector(conn) {
 
   const toC = nodeCenter(toNode);
   const fromC = nodeCenter(fromNode);
-  const p1 = edgePoint(fromNode, toC.x, toC.y);
-  const p2 = edgePoint(toNode, fromC.x, fromC.y);
+  const waypoints = conn.waypoints || [];
+  const aimTowardTo = waypoints.length > 0 ? waypoints[0] : toC;
+  const aimTowardFrom = waypoints.length > 0 ? waypoints[waypoints.length - 1] : fromC;
+  const p1 = edgePoint(fromNode, aimTowardTo.x, aimTowardTo.y);
+  const p2 = edgePoint(toNode, aimTowardFrom.x, aimTowardFrom.y);
   const lineStyle = conn.lineStyle || "straight";
-  const d = buildConnectorPath(p1, p2, lineStyle);
+  const d = buildConnectorPath(p1, p2, lineStyle, waypoints);
 
   const isSelected = state.selection && state.selection.kind === "connector" && state.selection.id === conn.id;
 
   const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
 
-  // Wide invisible hit-path, easier to click than the thin visible line
+  // Wide invisible hit-path, easier to click than the thin visible line.
+  // Double-click/double-tap on it inserts a new waypoint at that spot.
   const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
   hitPath.setAttribute("d", d);
   hitPath.setAttribute("fill", "none");
@@ -506,6 +656,19 @@ function renderConnector(conn) {
   hitPath.style.cursor = "pointer";
   hitPath.addEventListener("click", (e) => {
     e.stopPropagation();
+    const now = Date.now();
+    const last = lastTapByConnId[conn.id] || 0;
+    if (now - last < 400) {
+      delete lastTapByConnId[conn.id];
+      const clickPoint = svgPointFromEvent(e);
+      snapshot();
+      conn.waypoints = conn.waypoints || [];
+      conn.waypoints.push({ x: clickPoint.x, y: clickPoint.y });
+      setSelection("connector", conn.id);
+      renderIconToolbar();
+      return;
+    }
+    lastTapByConnId[conn.id] = now;
     setSelection("connector", conn.id);
   });
   g.appendChild(hitPath);
@@ -519,6 +682,10 @@ function renderConnector(conn) {
   path.style.pointerEvents = "none";
   g.appendChild(path);
 
+  if (isSelected) {
+    waypoints.forEach((wp, idx) => renderWaypointHandle(g, conn, wp, idx));
+  }
+
   viewportEl.appendChild(g);
 
   if (isSelected) {
@@ -526,11 +693,100 @@ function renderConnector(conn) {
   }
 }
 
+/** Renders a single draggable waypoint handle. Drag to move it, double-click/double-tap to remove it. */
+function renderWaypointHandle(g, conn, wp, index) {
+  const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  dot.setAttribute("cx", wp.x);
+  dot.setAttribute("cy", wp.y);
+  dot.setAttribute("r", 5);
+  dot.setAttribute("fill", "#ffffff");
+  dot.setAttribute("stroke", "#0c0b09");
+  dot.setAttribute("stroke-width", "1.5");
+  dot.style.cursor = "grab";
+
+  let dragStart = null;
+  let preDragSnapshot = null;
+
+  const onDown = (e) => {
+    e.stopPropagation();
+    dragStart = svgPointFromEvent(e);
+    preDragSnapshot = {
+      nodes: JSON.parse(JSON.stringify(state.nodes)),
+      connectors: JSON.parse(JSON.stringify(state.connectors)),
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onUp);
+  };
+
+  const onMove = (e) => {
+    if (!dragStart) return;
+    e.preventDefault();
+    const point = svgPointFromEvent(e);
+    wp.x = point.x;
+    wp.y = point.y;
+    renderDiagram();
+  };
+
+  const onUp = () => {
+    if (dragStart && preDragSnapshot) {
+      state.undoStack.push(preDragSnapshot);
+      if (state.undoStack.length > MAX_HISTORY) state.undoStack.shift();
+      state.redoStack = [];
+      renderIconToolbar();
+    }
+    dragStart = null;
+    preDragSnapshot = null;
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    document.removeEventListener("touchmove", onMove);
+    document.removeEventListener("touchend", onUp);
+  };
+
+  dot.addEventListener("mousedown", onDown);
+  dot.addEventListener("touchstart", onDown, { passive: true });
+
+  let lastTap = 0;
+  dot.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const now = Date.now();
+    if (now - lastTap < 400) {
+      snapshot();
+      conn.waypoints.splice(index, 1);
+      renderDiagram();
+      renderIconToolbar();
+      return;
+    }
+    lastTap = now;
+  });
+
+  g.appendChild(dot);
+}
+
+/** Prompts for a new label and applies it, with undo support. Shared by double-click (desktop) and double-tap (touch) rename. */
+function renameNode(node) {
+  const newLabel = prompt("Rename box:", node.label);
+  if (newLabel !== null && newLabel.trim()) {
+    snapshot();
+    node.label = newLabel.trim();
+    renderDiagram();
+    renderIconToolbar();
+  }
+}
+
+let lastTapByNodeId = {};
+let lastTapByConnId = {};
+
 function renderNode(node) {
   const isSelected = state.selection && state.selection.kind === "node" && state.selection.id === node.id;
   const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
   g.setAttribute("data-node-id", node.id);
   g.style.cursor = "grab";
+
+  if (isSelected) {
+    positionNodeColorToolbar(node);
+  }
 
   const shape = makeShapeElement(node, isSelected);
   g.appendChild(shape);
@@ -580,60 +836,183 @@ function renderNode(node) {
       node.dragged = false;
       return;
     }
-    setSelection("node", node.id);
-  });
-  g.addEventListener("dblclick", (e) => {
-    e.stopPropagation();
-    const newLabel = prompt("Rename box:", node.label);
-    if (newLabel !== null && newLabel.trim()) {
-      snapshot();
-      node.label = newLabel.trim();
-      renderDiagram();
-      renderIconToolbar();
+    const now = Date.now();
+    const last = lastTapByNodeId[node.id] || 0;
+    if (now - last < 400) {
+      // Treat as a double-tap/double-click — works for touch screens too,
+      // since the browser's native dblclick event isn't reliably fired
+      // from two separate touch taps on Android/iOS. Tracked outside this
+      // render closure because renderDiagram() rebuilds this element on
+      // every state change (including the selection change from tap 1).
+      delete lastTapByNodeId[node.id];
+      renameNode(node);
+      return;
     }
+    lastTapByNodeId[node.id] = now;
+    setSelection("node", node.id);
   });
 
   attachNodeDrag(g, node);
   viewportEl.appendChild(g);
 }
 
+/**
+ * Returns SVG markup (as element-type + attribute info) describing a node's
+ * shape outline. Used by BOTH the live canvas renderer and the PNG export,
+ * so the two never drift out of sync with each other.
+ *
+ * Returns { tag, attrs } where tag is an SVG element name and attrs is a
+ * plain object of attribute name -> value (excluding fill/stroke, which
+ * callers apply themselves since they differ between canvas/export/selection state).
+ */
+function getShapeGeometry(node) {
+  const { x, y, w, h } = node;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+
+  switch (node.type) {
+    case "ellipse":
+      return { tag: "ellipse", attrs: { cx, cy, rx: w / 2, ry: h / 2 } };
+
+    case "diamond":
+      return {
+        tag: "polygon",
+        attrs: { points: `${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}` },
+      };
+
+    case "triangle":
+      return {
+        tag: "polygon",
+        attrs: { points: `${cx},${y} ${x + w},${y + h} ${x},${y + h}` },
+      };
+
+    case "hexagon": {
+      const cut = w * 0.22;
+      return {
+        tag: "polygon",
+        attrs: {
+          points: `${x + cut},${y} ${x + w - cut},${y} ${x + w},${cy} ${x + w - cut},${y + h} ${x + cut},${y + h} ${x},${cy}`,
+        },
+      };
+    }
+
+    case "parallelogram": {
+      const skew = w * 0.18;
+      return {
+        tag: "polygon",
+        attrs: {
+          points: `${x + skew},${y} ${x + w},${y} ${x + w - skew},${y + h} ${x},${y + h}`,
+        },
+      };
+    }
+
+    case "cylinder": {
+      const ry = Math.min(h * 0.18, 14);
+      return {
+        tag: "path",
+        attrs: {
+          d: `M ${x} ${y + ry} C ${x} ${y - ry / 2}, ${x + w} ${y - ry / 2}, ${x + w} ${y + ry} ` +
+             `L ${x + w} ${y + h - ry} C ${x + w} ${y + h + ry / 2}, ${x} ${y + h + ry / 2}, ${x} ${y + h - ry} Z ` +
+             `M ${x} ${y + ry} C ${x} ${y + ry * 2}, ${x + w} ${y + ry * 2}, ${x + w} ${y + ry}`,
+        },
+      };
+    }
+
+    case "cloud": {
+      // A simple cloud silhouette built from overlapping circles, scaled to the node's box.
+      const r1 = h * 0.32;
+      return {
+        tag: "path",
+        attrs: {
+          d: `M ${x + w * 0.22} ${y + h * 0.75} ` +
+             `a ${r1} ${r1} 0 0 1 -${r1 * 0.3} -${h * 0.45} ` +
+             `a ${h * 0.32} ${h * 0.32} 0 0 1 ${h * 0.55} -${h * 0.22} ` +
+             `a ${h * 0.28} ${h * 0.28} 0 0 1 ${h * 0.42} ${h * 0.18} ` +
+             `a ${h * 0.26} ${h * 0.26} 0 0 1 -${h * 0.06} ${h * 0.51} ` +
+             `z`,
+        },
+      };
+    }
+
+    case "callout": {
+      const tailW = w * 0.18;
+      const bodyH = h * 0.78;
+      return {
+        tag: "path",
+        attrs: {
+          d: `M ${x} ${y} L ${x + w} ${y} L ${x + w} ${y + bodyH} L ${x + tailW * 2} ${y + bodyH} ` +
+             `L ${x + tailW} ${y + h} L ${x + tailW} ${y + bodyH} L ${x} ${y + bodyH} Z`,
+        },
+      };
+    }
+
+    case "document": {
+      const waveH = h * 0.15;
+      return {
+        tag: "path",
+        attrs: {
+          d: `M ${x} ${y} L ${x + w} ${y} L ${x + w} ${y + h - waveH} ` +
+             `C ${x + w * 0.75} ${y + h + waveH}, ${x + w * 0.25} ${y + h - waveH * 2}, ${x} ${y + h} Z`,
+        },
+      };
+    }
+
+    case "person": {
+      const headR = w * 0.28;
+      const headCx = cx;
+      const headCy = y + headR + 2;
+      return {
+        tag: "g",
+        attrs: {},
+        children: [
+          { tag: "circle", attrs: { cx: headCx, cy: headCy, r: headR } },
+          {
+            tag: "path",
+            attrs: {
+              d: `M ${x + w * 0.08} ${y + h} ` +
+                 `Q ${x + w * 0.08} ${headCy + headR * 1.6}, ${cx} ${headCy + headR * 1.6} ` +
+                 `Q ${x + w * 0.92} ${headCy + headR * 1.6}, ${x + w * 0.92} ${y + h}`,
+            },
+          },
+        ],
+      };
+    }
+
+    case "text":
+      // Text nodes render as transparent — just a label, no visible box.
+      return { tag: "rect", attrs: { x, y, width: w, height: h }, transparent: true };
+
+    case "rounded":
+      return { tag: "rect", attrs: { x, y, width: w, height: h, rx: 18 } };
+
+    case "rect":
+    default:
+      return { tag: "rect", attrs: { x, y, width: w, height: h, rx: 6 } };
+  }
+}
+
 function makeShapeElement(node, isSelected) {
   const stroke = isSelected ? "#ffffff" : "#d4ff3a";
   const strokeWidth = isSelected ? "2.5" : "1.5";
-  const fill = "#0a0907";
+  const fill = node.type === "text" ? "transparent" : node.fillColor || "#0a0907";
 
-  let el;
-  if (node.type === "ellipse") {
-    el = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
-    el.setAttribute("cx", node.x + node.w / 2);
-    el.setAttribute("cy", node.y + node.h / 2);
-    el.setAttribute("rx", node.w / 2);
-    el.setAttribute("ry", node.h / 2);
-  } else if (node.type === "diamond") {
-    el = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-    const cx = node.x + node.w / 2;
-    const cy = node.y + node.h / 2;
-    const points = [
-      [cx, node.y],
-      [node.x + node.w, cy],
-      [cx, node.y + node.h],
-      [node.x, cy],
-    ]
-      .map((p) => p.join(","))
-      .join(" ");
-    el.setAttribute("points", points);
-  } else {
-    el = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    el.setAttribute("x", node.x);
-    el.setAttribute("y", node.y);
-    el.setAttribute("width", node.w);
-    el.setAttribute("height", node.h);
-    el.setAttribute("rx", node.type === "rounded" ? 18 : 6);
-  }
-
+  const geo = getShapeGeometry(node);
+  const el = buildSvgElement(geo);
   el.setAttribute("fill", fill);
-  el.setAttribute("stroke", stroke);
-  el.setAttribute("stroke-width", strokeWidth);
+  if (!geo.transparent) {
+    el.setAttribute("stroke", stroke);
+    el.setAttribute("stroke-width", strokeWidth);
+  }
+  return el;
+}
+
+/** Recursively builds a real SVG DOM element (and any children) from a geometry descriptor. */
+function buildSvgElement(geo) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", geo.tag);
+  Object.entries(geo.attrs).forEach(([k, v]) => el.setAttribute(k, v));
+  if (geo.children) {
+    geo.children.forEach((childGeo) => el.appendChild(buildSvgElement(childGeo)));
+  }
   return el;
 }
 
@@ -735,7 +1114,7 @@ function startConnector(fromNodeId, evt) {
     tempLine.remove();
     if (target) {
       snapshot();
-      const newConn = { id: generateId("conn"), from: fromNodeId, to: target.id, lineStyle: "straight" };
+      const newConn = { id: generateId("conn"), from: fromNodeId, to: target.id, lineStyle: "straight", waypoints: [] };
       state.connectors.push(newConn);
       setSelection("connector", newConn.id);
       renderIconToolbar();
@@ -770,15 +1149,7 @@ async function handleDownloadPng() {
   }
 
   const PADDING = 40;
-  const bounds = state.nodes.reduce(
-    (acc, n) => ({
-      minX: Math.min(acc.minX, n.x),
-      minY: Math.min(acc.minY, n.y),
-      maxX: Math.max(acc.maxX, n.x + n.w),
-      maxY: Math.max(acc.maxY, n.y + n.h),
-    }),
-    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-  );
+  const bounds = computeContentBounds();
 
   const width = bounds.maxX - bounds.minX + PADDING * 2;
   const height = bounds.maxY - bounds.minY + PADDING * 2;
@@ -813,9 +1184,12 @@ function buildExportSvg(width, height, offsetX, offsetY) {
     if (!fromNode || !toNode) return;
     const toC = nodeCenter(toNode);
     const fromC = nodeCenter(fromNode);
-    const p1 = edgePoint(fromNode, toC.x, toC.y);
-    const p2 = edgePoint(toNode, fromC.x, fromC.y);
-    const d = buildConnectorPath(p1, p2, conn.lineStyle || "straight");
+    const waypoints = conn.waypoints || [];
+    const aimTowardTo = waypoints.length > 0 ? waypoints[0] : toC;
+    const aimTowardFrom = waypoints.length > 0 ? waypoints[waypoints.length - 1] : fromC;
+    const p1 = edgePoint(fromNode, aimTowardTo.x, aimTowardTo.y);
+    const p2 = edgePoint(toNode, aimTowardFrom.x, aimTowardFrom.y);
+    const d = buildConnectorPath(p1, p2, conn.lineStyle || "straight", waypoints);
     parts.push(`<path d="${d}" fill="none" stroke="#d4ff3a" stroke-width="1.5" marker-end="url(#export-arrow)"/>`);
   });
 
@@ -832,17 +1206,25 @@ function buildExportSvg(width, height, offsetX, offsetY) {
 
 function exportShapeMarkup(node) {
   const stroke = "#d4ff3a";
-  if (node.type === "ellipse") {
-    return `<ellipse cx="${node.x + node.w / 2}" cy="${node.y + node.h / 2}" rx="${node.w / 2}" ry="${node.h / 2}" fill="#0a0907" stroke="${stroke}" stroke-width="1.5"/>`;
+  const fill = node.type === "text" ? "transparent" : node.fillColor || "#0a0907";
+  const geo = getShapeGeometry(node);
+  return geoToXmlString(geo, fill, geo.transparent ? null : stroke);
+}
+
+/** Serializes a geometry descriptor (from getShapeGeometry) to an XML string for the export SVG. */
+function geoToXmlString(geo, fill, stroke) {
+  const attrPairs = Object.entries(geo.attrs)
+    .map(([k, v]) => `${k}="${v}"`)
+    .join(" ");
+  const fillAttr = `fill="${fill}"`;
+  const strokeAttr = stroke ? `stroke="${stroke}" stroke-width="1.5"` : "";
+
+  if (geo.children) {
+    const childMarkup = geo.children.map((c) => geoToXmlString(c, fill, stroke)).join("");
+    return `<g ${fillAttr} ${strokeAttr}>${childMarkup}</g>`;
   }
-  if (node.type === "diamond") {
-    const cx = node.x + node.w / 2;
-    const cy = node.y + node.h / 2;
-    const points = `${cx},${node.y} ${node.x + node.w},${cy} ${cx},${node.y + node.h} ${node.x},${cy}`;
-    return `<polygon points="${points}" fill="#0a0907" stroke="${stroke}" stroke-width="1.5"/>`;
-  }
-  const rx = node.type === "rounded" ? 18 : 6;
-  return `<rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}" rx="${rx}" fill="#0a0907" stroke="${stroke}" stroke-width="1.5"/>`;
+
+  return `<${geo.tag} ${attrPairs} ${fillAttr} ${strokeAttr}/>`;
 }
 
 function escapeXml(str) {
@@ -900,8 +1282,8 @@ async function handleSave() {
   const diagram = {
     id: state.diagramId,
     name: state.name,
-    nodes: state.nodes.map(({ id, type, label, x, y, w, h }) => ({ id, type, label, x, y, w, h })),
-    connectors: state.connectors.map(({ id, from, to, lineStyle }) => ({ id, from, to, lineStyle: lineStyle || "straight" })),
+    nodes: state.nodes.map(({ id, type, label, x, y, w, h, fillColor }) => ({ id, type, label, x, y, w, h, fillColor: fillColor || null })),
+    connectors: state.connectors.map(({ id, from, to, lineStyle, waypoints }) => ({ id, from, to, lineStyle: lineStyle || "straight", waypoints: waypoints || [] })),
     meta: {},
   };
 
@@ -962,6 +1344,7 @@ async function loadDiagram(id) {
   state.nodes = diagram.nodes || [];
   state.connectors = diagram.connectors || [];
   render();
+  resetView();
 }
 
 function showToast(message) {
