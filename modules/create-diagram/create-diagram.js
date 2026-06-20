@@ -105,6 +105,7 @@ function freshState() {
     panning: null,     // active canvas-pan info
     undoStack: [],      // snapshots of {nodes, connectors} before each change
     redoStack: [],
+    activeWaypoint: null, // { connId, index } — which waypoint currently shows its remove (x) button
   };
 }
 
@@ -471,6 +472,9 @@ function setSelection(kind, id) {
   const delBtn = document.getElementById("delete-selected-btn");
   if (delBtn) delBtn.disabled = !state.selection;
   if (!kind) hideConnectorToolbar();
+  if (!(kind === "connector" && state.activeWaypoint && state.activeWaypoint.connId === id)) {
+    state.activeWaypoint = null;
+  }
   renderDiagram();
 }
 
@@ -646,8 +650,7 @@ function renderConnector(conn) {
 
   const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
 
-  // Wide invisible hit-path, easier to click than the thin visible line.
-  // Double-click/double-tap on it inserts a new waypoint at that spot.
+  // Wide invisible hit-path, easier to click than the thin visible line. A single click/tap selects the connector.
   const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
   hitPath.setAttribute("d", d);
   hitPath.setAttribute("fill", "none");
@@ -656,19 +659,6 @@ function renderConnector(conn) {
   hitPath.style.cursor = "pointer";
   hitPath.addEventListener("click", (e) => {
     e.stopPropagation();
-    const now = Date.now();
-    const last = lastTapByConnId[conn.id] || 0;
-    if (now - last < 400) {
-      delete lastTapByConnId[conn.id];
-      const clickPoint = svgPointFromEvent(e);
-      snapshot();
-      conn.waypoints = conn.waypoints || [];
-      conn.waypoints.push({ x: clickPoint.x, y: clickPoint.y });
-      setSelection("connector", conn.id);
-      renderIconToolbar();
-      return;
-    }
-    lastTapByConnId[conn.id] = now;
     setSelection("connector", conn.id);
   });
   g.appendChild(hitPath);
@@ -683,7 +673,9 @@ function renderConnector(conn) {
   g.appendChild(path);
 
   if (isSelected) {
+    const allPoints = [p1, ...waypoints, p2];
     waypoints.forEach((wp, idx) => renderWaypointHandle(g, conn, wp, idx));
+    renderAddWaypointButton(g, conn, allPoints);
   }
 
   viewportEl.appendChild(g);
@@ -693,23 +685,83 @@ function renderConnector(conn) {
   }
 }
 
+/** Renders a visible "+" button at the midpoint of the connector's longest segment, so adding a waypoint is a deliberate click, not a hidden gesture. */
+function renderAddWaypointButton(g, conn, allPoints) {
+  // Find the longest segment between consecutive points (start, waypoints..., end) — that's
+  // usually the most useful place to add a new bend.
+  let longest = { length: -1, mid: null };
+  for (let i = 0; i < allPoints.length - 1; i++) {
+    const a = allPoints[i];
+    const b = allPoints[i + 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (length > longest.length) {
+      longest = { length, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, insertIndex: i };
+    }
+  }
+  if (!longest.mid) return;
+
+  const btnGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  btnGroup.style.cursor = "pointer";
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", longest.mid.x);
+  circle.setAttribute("cy", longest.mid.y);
+  circle.setAttribute("r", 9);
+  circle.setAttribute("fill", "#d4ff3a");
+  circle.setAttribute("stroke", "#0c0b09");
+  circle.setAttribute("stroke-width", "1.5");
+  btnGroup.appendChild(circle);
+
+  const plus = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  plus.setAttribute("x", longest.mid.x);
+  plus.setAttribute("y", longest.mid.y + 4);
+  plus.setAttribute("text-anchor", "middle");
+  plus.setAttribute("font-size", "13");
+  plus.setAttribute("font-weight", "bold");
+  plus.setAttribute("fill", "#0c0b09");
+  plus.style.pointerEvents = "none";
+  plus.textContent = "+";
+  btnGroup.appendChild(plus);
+
+  btnGroup.addEventListener("click", (e) => {
+    e.stopPropagation();
+    snapshot();
+    conn.waypoints = conn.waypoints || [];
+    // Insert at the right position: insertIndex counts segments among [p1, ...waypoints, p2],
+    // so inserting after waypoint (insertIndex - 1) keeps order correct (insertIndex=0 means
+    // "before the first waypoint", which is array index 0).
+    conn.waypoints.splice(longest.insertIndex, 0, longest.mid);
+    renderDiagram();
+    renderIconToolbar();
+  });
+
+  g.appendChild(btnGroup);
+}
+
 /** Renders a single draggable waypoint handle. Drag to move it, double-click/double-tap to remove it. */
 function renderWaypointHandle(g, conn, wp, index) {
+  const isActiveWaypoint =
+    state.activeWaypoint &&
+    state.activeWaypoint.connId === conn.id &&
+    state.activeWaypoint.index === index;
+
   const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   dot.setAttribute("cx", wp.x);
   dot.setAttribute("cy", wp.y);
-  dot.setAttribute("r", 5);
+  dot.setAttribute("r", isActiveWaypoint ? 6 : 5);
   dot.setAttribute("fill", "#ffffff");
-  dot.setAttribute("stroke", "#0c0b09");
-  dot.setAttribute("stroke-width", "1.5");
+  dot.setAttribute("stroke", isActiveWaypoint ? "#d4ff3a" : "#0c0b09");
+  dot.setAttribute("stroke-width", isActiveWaypoint ? "2.5" : "1.5");
   dot.style.cursor = "grab";
 
   let dragStart = null;
   let preDragSnapshot = null;
+  let pointerMoved = false;
 
   const onDown = (e) => {
     e.stopPropagation();
     dragStart = svgPointFromEvent(e);
+    pointerMoved = false;
     preDragSnapshot = {
       nodes: JSON.parse(JSON.stringify(state.nodes)),
       connectors: JSON.parse(JSON.stringify(state.connectors)),
@@ -724,17 +776,24 @@ function renderWaypointHandle(g, conn, wp, index) {
     if (!dragStart) return;
     e.preventDefault();
     const point = svgPointFromEvent(e);
+    if (Math.abs(point.x - dragStart.x) > 2 || Math.abs(point.y - dragStart.y) > 2) pointerMoved = true;
     wp.x = point.x;
     wp.y = point.y;
     renderDiagram();
   };
 
   const onUp = () => {
-    if (dragStart && preDragSnapshot) {
+    if (pointerMoved && dragStart && preDragSnapshot) {
       state.undoStack.push(preDragSnapshot);
       if (state.undoStack.length > MAX_HISTORY) state.undoStack.shift();
       state.redoStack = [];
       renderIconToolbar();
+    }
+    if (!pointerMoved) {
+      // A plain click/tap (no drag) toggles this waypoint as "active",
+      // which reveals its remove ("x") button.
+      state.activeWaypoint = isActiveWaypoint ? null : { connId: conn.id, index };
+      renderDiagram();
     }
     dragStart = null;
     preDragSnapshot = null;
@@ -746,20 +805,52 @@ function renderWaypointHandle(g, conn, wp, index) {
 
   dot.addEventListener("mousedown", onDown);
   dot.addEventListener("touchstart", onDown, { passive: true });
+  g.appendChild(dot);
 
-  let lastTap = 0;
-  dot.addEventListener("click", (e) => {
+  if (isActiveWaypoint) {
+    renderRemoveWaypointButton(g, conn, wp, index);
+  }
+}
+
+/** Renders a small visible "x" button next to an active (selected) waypoint, to remove it deliberately. */
+function renderRemoveWaypointButton(g, conn, wp, index) {
+  const offsetX = wp.x + 14;
+  const offsetY = wp.y - 14;
+
+  const btnGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  btnGroup.style.cursor = "pointer";
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  circle.setAttribute("cx", offsetX);
+  circle.setAttribute("cy", offsetY);
+  circle.setAttribute("r", 8);
+  circle.setAttribute("fill", "#ff5a4e");
+  circle.setAttribute("stroke", "#0c0b09");
+  circle.setAttribute("stroke-width", "1.5");
+  btnGroup.appendChild(circle);
+
+  const xMark = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  xMark.setAttribute("x", offsetX);
+  xMark.setAttribute("y", offsetY + 3.5);
+  xMark.setAttribute("text-anchor", "middle");
+  xMark.setAttribute("font-size", "11");
+  xMark.setAttribute("font-weight", "bold");
+  xMark.setAttribute("fill", "#ffffff");
+  xMark.style.pointerEvents = "none";
+  xMark.textContent = "\u00d7";
+  btnGroup.appendChild(xMark);
+
+  btnGroup.addEventListener("click", (e) => {
     e.stopPropagation();
-    const now = Date.now();
-    if (now - lastTap < 400) {
-      snapshot();
-      conn.waypoints.splice(index, 1);
-      renderDiagram();
-      renderIconToolbar();
-      return;
-    }
-    lastTap = now;
+    snapshot();
+    conn.waypoints.splice(index, 1);
+    state.activeWaypoint = null;
+    renderDiagram();
+    renderIconToolbar();
   });
+
+  g.appendChild(btnGroup);
+}
 
   g.appendChild(dot);
 }
