@@ -1,0 +1,412 @@
+/**
+ * theme.css
+ * Design tokens for ArchitectSmartCraft.
+ * Aesthetic: warm near-black background, acid-lime accent,
+ * Instrument Serif headlines, JetBrains Mono UI, instrument-panel feel.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  /* Core palette */
+  --color-bg: #0c0b09;
+  --color-bg-raised: #16140f;
+  --color-bg-inset: #0a0907;
+  --color-accent: #d4ff3a;
+  --color-accent-dim: rgba(212, 255, 58, 0.35);
+  --color-accent-faint: rgba(212, 255, 58, 0.12);
+  --color-text: #f4f2ea;
+  --color-text-secondary: #a8a496;
+  --color-text-tertiary: #6b6858;
+  --color-border: rgba(212, 255, 58, 0.18);
+  --color-border-strong: rgba(212, 255, 58, 0.4);
+  --color-danger: #ff5a4e;
+  --color-success: #4ee08a;
+
+  /* Typography */
+  --font-serif: 'Instrument Serif', serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Layout */
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-lg: 18px;
+  --header-height: 64px;
+  --nav-height: 64px;
+  --max-width: 920px;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  margin: 0 0 0.5em;
+  color: var(--color-text);
+}
+
+h1 { font-size: 32px; }
+h2 { font-size: 24px; }
+h3 { font-size: 19px; }
+
+p { margin: 0 0 1em; color: var(--color-text-secondary); }
+
+a { color: var(--color-accent); text-decoration: none; }
+
+button {
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* ---------------------------------------------------------- */
+/* Layout shell */
+/* ---------------------------------------------------------- */
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  background: var(--color-bg);
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.brand-name {
+  font-family: var(--font-serif);
+  font-size: 19px;
+  color: var(--color-text);
+  letter-spacing: 0.01em;
+}
+
+.brand-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--color-accent);
+  opacity: 0.8;
+  text-transform: uppercase;
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 24px 20px calc(var(--nav-height) + 32px);
+}
+
+/* ---------------------------------------------------------- */
+/* Bottom nav (mobile-first, also fine on laptop) */
+/* ---------------------------------------------------------- */
+
+.app-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--nav-height);
+  display: flex;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+  z-index: 10;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 0;
+  transition: color 0.15s ease;
+}
+
+.nav-item svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+}
+
+.nav-item.active {
+  color: var(--color-accent);
+}
+
+.nav-item:active {
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------- */
+/* Instrument-panel decorative elements */
+/* ---------------------------------------------------------- */
+
+.corner-frame {
+  position: relative;
+}
+
+.corner-frame::before,
+.corner-frame::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--color-accent-dim);
+}
+
+.corner-frame::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.corner-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+.ruler-ticks {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  height: 10px;
+  opacity: 0.4;
+}
+
+.ruler-ticks span {
+  width: 1px;
+  background: var(--color-accent);
+  height: 6px;
+}
+
+.ruler-ticks span:nth-child(3n) {
+  height: 10px;
+}
+
+/* ---------------------------------------------------------- */
+/* Cards / panels */
+/* ---------------------------------------------------------- */
+
+.panel {
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+}
+
+.panel + .panel {
+  margin-top: 14px;
+}
+
+.label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  margin-bottom: 8px;
+  display: block;
+}
+
+/* ---------------------------------------------------------- */
+/* Buttons */
+/* ---------------------------------------------------------- */
+
+.btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn:hover {
+  background: var(--color-accent-faint);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border-color: var(--color-accent);
+  font-weight: 500;
+}
+
+.btn-primary:hover {
+  background: var(--color-accent);
+  opacity: 0.9;
+}
+
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
+
+.btn-danger {
+  border-color: rgba(255, 90, 78, 0.4);
+  color: var(--color-danger);
+}
+
+/* ---------------------------------------------------------- */
+/* Form elements */
+/* ---------------------------------------------------------- */
+
+input[type="text"],
+input[type="file"],
+select,
+textarea {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--color-bg-inset);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  padding: 10px 12px;
+  width: 100%;
+}
+
+input[type="text"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* ---------------------------------------------------------- */
+/* Empty states */
+/* ---------------------------------------------------------- */
+
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--color-text-tertiary);
+}
+
+.empty-state .empty-icon {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 16px;
+  stroke: var(--color-accent-dim);
+  fill: none;
+  stroke-width: 1.2;
+}
+
+/* ---------------------------------------------------------- */
+/* Toast / status messages */
+/* ---------------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  bottom: calc(var(--nav-height) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text);
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.toast.show {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------- */
+/* Utility */
+/* ---------------------------------------------------------- */
+
+.hidden { display: none !important; }
+.text-center { text-align: center; }
+.mt-1 { margin-top: 8px; }
+.mt-2 { margin-top: 16px; }
+.flex { display: flex; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.gap-1 { gap: 8px; }
+.gap-2 { gap: 16px; }
+
+@media (min-width: 700px) {
+  .app-nav {
+    position: sticky;
+    bottom: auto;
+    top: var(--header-height);
+    border-top: none;
+    border-bottom: 1px solid var(--color-border);
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .nav-item {
+    flex: none;
+    flex-direction: row;
+    padding: 14px 20px;
+  }
+}

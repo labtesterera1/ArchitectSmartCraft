@@ -1,0 +1,56 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .bg { fill: #0c0b09; }
+      .lime { fill: #d4ff3a; }
+      .lime-stroke { stroke: #d4ff3a; }
+      .dim { stroke: #d4ff3a; opacity: 0.35; }
+      .mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="88" class="bg"/>
+
+  <!-- Ruler ticks along top edge -->
+  <g class="dim" stroke-width="2">
+    <line x1="40" y1="36" x2="40" y2="50"/>
+    <line x1="76" y1="40" x2="76" y2="50"/>
+    <line x1="112" y1="40" x2="112" y2="50"/>
+    <line x1="148" y1="36" x2="148" y2="50"/>
+    <line x1="364" y1="36" x2="364" y2="50"/>
+    <line x1="400" y1="40" x2="400" y2="50"/>
+    <line x1="436" y1="40" x2="436" y2="50"/>
+    <line x1="472" y1="36" x2="472" y2="50"/>
+  </g>
+
+  <!-- Viewfinder corner brackets -->
+  <g class="lime-stroke" stroke-width="6" fill="none" stroke-linecap="square">
+    <path d="M 56 96 L 56 64 L 88 64"/>
+    <path d="M 424 64 L 456 64 L 456 96"/>
+    <path d="M 456 416 L 456 448 L 424 448"/>
+    <path d="M 88 448 L 56 448 L 56 416"/>
+  </g>
+
+  <!-- Core mark: three connected nodes forming an architecture / flow glyph -->
+  <g class="lime-stroke" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- connectors -->
+    <path d="M 178 198 L 178 314"/>
+    <path d="M 178 256 L 256 256"/>
+    <path d="M 256 256 L 334 198"/>
+    <path d="M 256 256 L 334 314"/>
+  </g>
+
+  <!-- node squares -->
+  <rect x="146" y="166" width="64" height="64" rx="10" class="bg" stroke="#d4ff3a" stroke-width="6"/>
+  <rect x="146" y="282" width="64" height="64" rx="10" class="bg" stroke="#d4ff3a" stroke-width="6"/>
+  <rect x="224" y="224" width="64" height="64" rx="10" class="lime"/>
+  <rect x="302" y="166" width="64" height="64" rx="10" class="bg" stroke="#d4ff3a" stroke-width="6"/>
+  <rect x="302" y="282" width="64" height="64" rx="10" class="bg" stroke="#d4ff3a" stroke-width="6"/>
+
+  <!-- Crosshair center dot accents -->
+  <circle cx="256" cy="256" r="3" class="bg"/>
+
+  <!-- Bottom mono micro-label, instrument-panel feel -->
+  <text x="256" y="478" text-anchor="middle" class="mono lime" font-size="18" letter-spacing="3" opacity="0.85">ASC</text>
+</svg>
