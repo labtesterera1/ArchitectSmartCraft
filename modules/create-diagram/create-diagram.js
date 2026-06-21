@@ -65,30 +65,46 @@ const MIN_ZOOM  = 0.2;
 const MAX_ZOOM  = 3;
 const MAX_UNDO  = 60;
 
+const THEMES = [
+  { key:"dark",      label:"Dark",      bg:"#0c0b09", grid:"rgba(212,255,58,0.06)", stroke:"#d4ff3a", fill:"#0a0907", text:"#f4f2ea", border:"rgba(212,255,58,0.18)" },
+  { key:"light",     label:"Light",     bg:"#ffffff", grid:"rgba(0,0,0,0.07)",       stroke:"#333333", fill:"#ffffff", text:"#222222", border:"rgba(0,0,0,0.15)" },
+  { key:"blueprint", label:"Blueprint", bg:"#1a3a5c", grid:"rgba(100,180,255,0.12)", stroke:"#88ccff", fill:"#1a3a5c", text:"#e8f0ff", border:"rgba(100,180,255,0.25)" },
+  { key:"warm",      label:"Warm",      bg:"#2d2418", grid:"rgba(255,200,80,0.08)",  stroke:"#ffc850", fill:"#2d2418", text:"#f5e6c8", border:"rgba(255,200,80,0.2)" },
+  { key:"white",     label:"Clean",     bg:"#f8f8f8", grid:"rgba(0,0,0,0.05)",       stroke:"#555555", fill:"#f8f8f8", text:"#111111", border:"rgba(0,0,0,0.12)" },
+];
+
 // ================================================================
 // MODULE STATE
 // ================================================================
 
 let el = {};          // cached DOM references
 let S  = newState();  // diagram + UI state
+let customShapes = []; // uploaded images: [{id, name, dataUrl}]
 
 function newState() {
   return {
     id: null, name: "Untitled", nodes: [], conns: [],
     sel: null, pan: { x: 40, y: 30 }, zoom: 1,
     undo: [], redo: [], activeWp: null,
-    tool: null,           // null | "text"
+    tool: null,           // null | "text" | "connect"
     lineStyle: "straight", // default for new connectors
     pendingColor: null,
+    theme: "dark",         // canvas theme key
   };
 }
+
+function theme() { return THEMES.find(t => t.key === S.theme) || THEMES[0]; }
 
 // ================================================================
 // ENTRY
 // ================================================================
 
-export function initCreateDiagramView(container) {
+export async function initCreateDiagramView(container) {
   S = newState();
+  const savedTheme = await storage.settings.get("diagramTheme");
+  if (savedTheme && THEMES.find(t => t.key === savedTheme)) S.theme = savedTheme;
+  const savedShapes = await storage.settings.get("customShapes");
+  if (Array.isArray(savedShapes)) customShapes = savedShapes;
   buildShell(container);
   draw();
   loadSavedList();
@@ -158,6 +174,8 @@ function buildShell(container) {
   buildToolbar();
   buildPalette();
   bindCanvas();
+  bindKeyboard();
+  applyTheme();
 }
 
 // ================================================================
@@ -182,6 +200,9 @@ const TB = {
   text:    `<line x1="6" y1="6" x2="18" y2="6"/><line x1="12" y1="6" x2="12" y2="18"/><line x1="9" y1="18" x2="15" y2="18"/>`,
   trash:   `<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>`,
   dl:      `<path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M5 19h14"/>`,
+  theme:   `<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>`,
+  copy:    `<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>`,
+  paste:   `<rect x="6" y="3" width="12" height="6" rx="1"/><rect x="4" y="9" width="16" height="12" rx="2"/>`,
 };
 
 function buildToolbar() {
@@ -193,10 +214,13 @@ function buildToolbar() {
     tbBtn("tb-un", TB.undo, "Undo",  S.undo.length===0),
     tbBtn("tb-re", TB.redo, "Redo",  S.redo.length===0),
     tbSep(),
-    tbBtn("tb-cn", TB.conn,  "Connector style", false, S.tool==="connect"),
+    tbBtn("tb-cn", TB.conn,  "Connector tool", false, S.tool==="connect"),
     tbBtn("tb-br", TB.brush, "Fill color"),
     tbBtn("tb-tx", TB.text,  "Text tool", false, S.tool==="text"),
+    tbBtn("tb-th", TB.theme, "Canvas theme"),
     tbSep(),
+    tbBtn("tb-cp", TB.copy,  "Copy", !S.sel || S.sel.k !== "node"),
+    tbBtn("tb-ps", TB.paste, "Paste", !S._clipboard),
     tbBtn("tb-del",TB.trash, "Delete", !S.sel),
     tbSep(),
     tbBtn("tb-dl", TB.dl,    "Download PNG"),
@@ -210,6 +234,9 @@ function buildToolbar() {
   on("tb-cn",  openConnPopup);
   on("tb-br",  openColorPopup);
   on("tb-tx",  toggleTextTool);
+  on("tb-th",  openThemePopup);
+  on("tb-cp",  copyNode);
+  on("tb-ps",  pasteNode);
   on("tb-del", deleteSel);
   on("tb-dl",  downloadPng);
 }
@@ -225,9 +252,19 @@ function buildPalette() {
     `<button class="btn" data-shape="${s.type}" title="${s.label}" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;line-height:0">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">${s.icon}</svg>
       <span style="font-size:8px;line-height:1">${s.label}</span></button>`
-  ).join("")}</div>`;
+  ).join("")}</div>
+  <div style="margin-top:12px;border-top:1px solid var(--color-border);padding-top:10px">
+    <span class="label" style="margin-bottom:6px">Store Shapes</span>
+    <div id="dd-custom-shapes" style="display:grid;grid-template-columns:1fr 1fr;gap:5px"></div>
+    <label class="btn btn-block mt-1" style="font-size:10px;cursor:pointer;justify-content:center;padding:6px">
+      + Upload
+      <input type="file" id="dd-shape-upload" accept="image/*" class="hidden" multiple/>
+    </label>
+  </div>`;
   el.palette.querySelectorAll("[data-shape]").forEach(b =>
     b.addEventListener("click", () => addShape(b.dataset.shape)));
+  document.getElementById("dd-shape-upload").addEventListener("change", handleShapeUpload);
+  renderCustomShapes();
 }
 
 // ================================================================
@@ -492,6 +529,141 @@ function openColorPopup() {
 // DRAWING — MAIN RENDER
 // ================================================================
 
+// ================================================================
+// THEME
+// ================================================================
+
+function openThemePopup() {
+  if (!el.popup.classList.contains("hidden")) { closePopup(); return; }
+  el.popup.style.left = document.getElementById("tb-th").offsetLeft + "px";
+  el.popup.innerHTML = `<div style="display:flex;flex-direction:column;gap:3px">${
+    THEMES.map(t => `<button class="btn${S.theme===t.key?" btn-primary":""}" data-theme="${t.key}" style="padding:6px 12px;display:flex;gap:8px;align-items:center;border:none">
+      <span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${t.bg};border:2px solid ${t.stroke}"></span>
+      <span style="font-size:11px">${t.label}</span></button>`).join("")
+  }</div>`;
+  el.popup.classList.remove("hidden");
+  el.popup.querySelectorAll("[data-theme]").forEach(b => b.addEventListener("click", async e => {
+    e.stopPropagation();
+    S.theme = b.dataset.theme;
+    await storage.settings.set("diagramTheme", S.theme);
+    closePopup();
+    applyTheme();
+    draw();
+    buildToolbar();
+  }));
+}
+
+function applyTheme() {
+  const t = theme();
+  const wrap = document.getElementById("dd-canvas-wrap");
+  if (wrap) wrap.style.background = t.bg;
+  // Update grid pattern
+  const gridPath = el.svg.querySelector("#grid path");
+  if (gridPath) gridPath.setAttribute("stroke", t.grid);
+  // Update all markers to use theme stroke color
+  el.svg.querySelectorAll("[id^='ah']").forEach(m => {
+    m.querySelectorAll("polygon").forEach(p => { if(p.getAttribute("fill")!=="#fff") p.setAttribute("fill", t.stroke); });
+    m.querySelectorAll("circle").forEach(c => { if(c.getAttribute("fill")!=="#fff") c.setAttribute("fill", t.stroke); });
+    m.querySelectorAll("path").forEach(p => { if(p.getAttribute("stroke") && p.getAttribute("stroke")!=="#fff") p.setAttribute("stroke", t.stroke); });
+  });
+}
+
+// ================================================================
+// COPY / PASTE
+// ================================================================
+
+function copyNode() {
+  if (!S.sel || S.sel.k !== "node") return;
+  const node = S.nodes.find(n => n.id === S.sel.id);
+  if (!node) return;
+  S._clipboard = structuredClone(node);
+  buildToolbar();
+  toast("Copied");
+}
+
+function pasteNode() {
+  if (!S._clipboard) return;
+  snap();
+  const node = { ...structuredClone(S._clipboard), id: uid("n"), x: S._clipboard.x + 30, y: S._clipboard.y + 30 };
+  S.nodes.push(node);
+  S._clipboard.x += 30; S._clipboard.y += 30; // offset next paste
+  setSel({ k: "node", id: node.id });
+  toast("Pasted");
+}
+
+function bindKeyboard() {
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if ((e.ctrlKey || e.metaKey) && e.key === "c") { copyNode(); e.preventDefault(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "v") { pasteNode(); e.preventDefault(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "z") { if (e.shiftKey) redo(); else undo(); e.preventDefault(); }
+    if (e.key === "Delete" || e.key === "Backspace") { if (S.sel) { deleteSel(); e.preventDefault(); } }
+  });
+}
+
+// ================================================================
+// STORE SHAPES (upload custom images)
+// ================================================================
+
+async function handleShapeUpload(e) {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  for (const file of files) {
+    const dataUrl = await fileToBase64(file);
+    customShapes.push({ id: uid("cs"), name: file.name.replace(/\.\w+$/, ""), dataUrl });
+  }
+  await storage.settings.set("customShapes", customShapes);
+  renderCustomShapes();
+  e.target.value = "";
+  toast(`${files.length} shape${files.length > 1 ? "s" : ""} uploaded`);
+}
+
+function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+function renderCustomShapes() {
+  const container = document.getElementById("dd-custom-shapes");
+  if (!container) return;
+  if (!customShapes.length) { container.innerHTML = `<p style="font-size:9px;color:var(--color-text-tertiary);grid-column:1/-1">No shapes uploaded yet</p>`; return; }
+  container.innerHTML = customShapes.map(cs => `
+    <div class="btn" data-cs="${cs.id}" title="${cs.name}" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 2px;line-height:0;position:relative;cursor:pointer">
+      <img src="${cs.dataUrl}" style="width:28px;height:28px;object-fit:contain"/>
+      <span style="font-size:7px;line-height:1;max-width:44px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cs.name)}</span>
+      <button data-rm-cs="${cs.id}" style="position:absolute;top:-2px;right:-2px;width:14px;height:14px;border-radius:50%;background:#ff5a4e;border:none;color:#fff;font-size:9px;line-height:1;cursor:pointer;padding:0" title="Remove">×</button>
+    </div>`).join("");
+  container.querySelectorAll("[data-cs]").forEach(b => b.addEventListener("click", () => addImageShape(b.dataset.cs)));
+  container.querySelectorAll("[data-rm-cs]").forEach(b => b.addEventListener("click", async e => {
+    e.stopPropagation();
+    customShapes = customShapes.filter(c => c.id !== b.dataset.rmCs);
+    await storage.settings.set("customShapes", customShapes);
+    renderCustomShapes();
+  }));
+}
+
+function addImageShape(csId) {
+  const cs = customShapes.find(c => c.id === csId);
+  if (!cs) return;
+  snap();
+  const vis = visBounds();
+  const node = {
+    id: uid("n"), type: "image", label: cs.name,
+    x: vis.x + 40, y: vis.y + 40, w: 80, h: 80,
+    fill: null, imageData: cs.dataUrl,
+  };
+  S.nodes.push(node);
+  setSel({ k: "node", id: node.id });
+}
+
+// ================================================================
+// DRAWING — MAIN RENDER
+// ================================================================
+
 function draw() {
   el.vp.innerHTML = "";
   applyVP();
@@ -508,28 +680,51 @@ function drawNode(node) {
   const g = svgEl("g"); g.style.cursor = "grab";
 
   // shape
-  const shape = buildShape(node);
-  const fill = node.type === "text" ? "transparent" : (node.fill || "#0a0907");
-  shape.setAttribute("fill", fill);
-  if (node.type !== "text") {
-    shape.setAttribute("stroke", isSel ? "#fff" : "#d4ff3a");
-    shape.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
+  let shape;
+  if (node.type === "image" && node.imageData) {
+    shape = svgEl("image");
+    shape.setAttribute("href", node.imageData);
+    shape.setAttribute("x", node.x); shape.setAttribute("y", node.y);
+    shape.setAttribute("width", node.w); shape.setAttribute("height", node.h);
+    shape.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    if (isSel) {
+      const border = svgEl("rect");
+      border.setAttribute("x", node.x); border.setAttribute("y", node.y);
+      border.setAttribute("width", node.w); border.setAttribute("height", node.h);
+      border.setAttribute("fill", "none"); border.setAttribute("stroke", "#fff");
+      border.setAttribute("stroke-width", "2.5"); border.setAttribute("stroke-dasharray", "4 2");
+      border.setAttribute("rx", "4");
+      g.appendChild(border);
+    }
+  } else {
+    shape = buildShape(node);
+    const t = theme();
+    const fill = node.type === "text" ? "transparent" : (node.fill || t.fill);
+    shape.setAttribute("fill", fill);
+    if (node.type !== "text") {
+      shape.setAttribute("stroke", isSel ? "#fff" : t.stroke);
+      shape.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
+    }
   }
   g.appendChild(shape);
 
-  // label
-  const txt = svgEl("text");
-  txt.setAttribute("x", node.x + node.w/2);
-  txt.setAttribute("y", node.y + node.h/2 + 5);
-  txt.setAttribute("text-anchor", "middle");
-  const fontSize = node.fontSize || 12;
-  const textColor = node.textColor || (lightOrDark(fill) === "dark" ? "#f4f2ea" : "#0c0b09");
-  txt.setAttribute("fill", textColor);
-  txt.setAttribute("font-size", fontSize);
-  txt.setAttribute("font-family", "JetBrains Mono,monospace");
-  txt.style.pointerEvents = "none";
-  txt.textContent = node.label;
-  g.appendChild(txt);
+  // label (skip for image nodes or show below)
+  if (node.type !== "image") {
+    const txt = svgEl("text");
+    txt.setAttribute("x", node.x + node.w/2);
+    txt.setAttribute("y", node.y + node.h/2 + 5);
+    txt.setAttribute("text-anchor", "middle");
+    const fontSize = node.fontSize || 12;
+    const t = theme();
+    const nodeFill = node.type === "text" ? "transparent" : (node.fill || t.fill);
+    const textColor = node.textColor || (lightOrDark(nodeFill) === "dark" ? t.text : "#0c0b09");
+    txt.setAttribute("fill", textColor);
+    txt.setAttribute("font-size", fontSize);
+    txt.setAttribute("font-family", "JetBrains Mono,monospace");
+    txt.style.pointerEvents = "none";
+    txt.textContent = node.label;
+    g.appendChild(txt);
+  }
 
   // edge handles (for connecting)
   if (isSel) {
@@ -673,7 +868,7 @@ function drawConn(conn) {
   // visible line
   const line = svgEl("path");
   line.setAttribute("d", d); line.setAttribute("fill", "none");
-  line.setAttribute("stroke", isSel ? "#fff" : "#d4ff3a");
+  line.setAttribute("stroke", isSel ? "#fff" : theme().stroke);
   line.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
   const endArrow = conn.endArrow || "filled";
   const startArrow = conn.startArrow || "none";
@@ -699,11 +894,12 @@ function drawConn(conn) {
 
 /** Renders a visible dot at a freeform connector endpoint. Draggable when the connector is selected. */
 function drawEndpointDot(g, pt, conn, ptKey, isSel) {
+  const isStart = ptKey === "fromPt";
   const dot = svgEl("circle");
   dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y);
-  dot.setAttribute("r", isSel ? 7 : 5);
-  dot.setAttribute("fill", isSel ? "#5ab8ff" : "#d4ff3a");
-  dot.setAttribute("stroke", "#0c0b09"); dot.setAttribute("stroke-width", "1.5");
+  dot.setAttribute("r", isSel ? 8 : 6);
+  dot.setAttribute("fill", isStart ? "#4ee08a" : "#5ab8ff");
+  dot.setAttribute("stroke", "#0c0b09"); dot.setAttribute("stroke-width", "2");
   dot.style.cursor = isSel ? "grab" : "pointer";
 
   if (isSel) {
@@ -943,6 +1139,7 @@ function buildShape(node) {
     case "person":        { const hr=w*.28, hcy=y+hr+2; const g=svgEl("g"); g.appendChild(mkEl("circle",{cx,cy:hcy,r:hr})); g.appendChild(mkEl("path",{d:`M${x+w*.08} ${y+h}Q${x+w*.08} ${hcy+hr*1.6} ${cx} ${hcy+hr*1.6}Q${x+w*.92} ${hcy+hr*1.6} ${x+w*.92} ${y+h}`})); return g; }
     case "rounded":       return mkEl("rect",{x,y,width:w,height:h,rx:18});
     case "text":          return mkEl("rect",{x,y,width:w,height:h,rx:4,"stroke-dasharray":"3 2",stroke:"rgba(212,255,58,0.3)","stroke-width":"0.8"});
+    case "image":         return mkEl("rect",{x,y,width:w,height:h,rx:4}); // fallback outline
     default:              return mkEl("rect",{x,y,width:w,height:h,rx:6});
   }
 }
@@ -976,15 +1173,16 @@ async function downloadPng() {
   const w=b.maxX-b.minX+PAD*2, h=b.maxY-b.minY+PAD*2;
   const ox=PAD-b.minX, oy=PAD-b.minY;
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`;
-  svg += `<rect width="${w}" height="${h}" fill="#0c0b09"/>`;
-  svg += `<defs><marker id="ea" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="#d4ff3a"/></marker>`;
-  svg += `<marker id="ea-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="#d4ff3a" stroke-width="1.5"/></marker>`;
-  svg += `<marker id="ea-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="#d4ff3a"/></marker>`;
-  svg += `<marker id="ea-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="#d4ff3a"/></marker>`;
-  svg += `<marker id="es-arrow" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><path d="M9 0L0 4.5L9 9" fill="none" stroke="#d4ff3a" stroke-width="1.5"/></marker>`;
-  svg += `<marker id="es-filled" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><polygon points="9 0,0 4.5,9 9" fill="#d4ff3a"/></marker>`;
-  svg += `<marker id="es-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><polygon points="0,5 5,0 10,5 5,10" fill="#d4ff3a"/></marker>`;
-  svg += `<marker id="es-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><circle cx="4" cy="4" r="3" fill="#d4ff3a"/></marker>`;
+  const t = theme();
+  svg += `<rect width="${w}" height="${h}" fill="${t.bg}"/>`;
+  svg += `<defs><marker id="ea" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="${t.stroke}"/></marker>`;
+  svg += `<marker id="ea-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="${t.stroke}" stroke-width="1.5"/></marker>`;
+  svg += `<marker id="ea-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="${t.stroke}"/></marker>`;
+  svg += `<marker id="ea-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="${t.stroke}"/></marker>`;
+  svg += `<marker id="es-arrow" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><path d="M9 0L0 4.5L9 9" fill="none" stroke="${t.stroke}" stroke-width="1.5"/></marker>`;
+  svg += `<marker id="es-filled" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><polygon points="9 0,0 4.5,9 9" fill="${t.stroke}"/></marker>`;
+  svg += `<marker id="es-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><polygon points="0,5 5,0 10,5 5,10" fill="${t.stroke}"/></marker>`;
+  svg += `<marker id="es-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><circle cx="4" cy="4" r="3" fill="${t.stroke}"/></marker>`;
   svg += `</defs>`;
   svg += `<g transform="translate(${ox},${oy})">`;
 
@@ -1003,15 +1201,15 @@ async function downloadPng() {
     if (endA === "filled") markers += ` marker-end="url(#ea)"`;
     else if (endA !== "none") markers += ` marker-end="url(#ea-${endA})"`;
     if (startA !== "none") markers += ` marker-start="url(#es-${startA})"`;
-    svg += `<path d="${buildPath(p1,p2,c.style||"straight",wp)}" fill="none" stroke="#d4ff3a" stroke-width="1.5"${markers}/>`;
+    svg += `<path d="${buildPath(p1,p2,c.style||"straight",wp)}" fill="none" stroke="${t.stroke}" stroke-width="1.5"${markers}/>`;
   });
 
   S.nodes.forEach(n => {
-    const fill = n.type==="text"?"transparent":(n.fill||"#0a0907");
-    const stroke = n.type==="text"?"none":"#d4ff3a";
+    const fill = n.type==="text"?"transparent":(n.fill||t.fill);
+    const stroke = n.type==="text"?"none":t.stroke;
     svg += shapeToSvgStr(n, fill, stroke);
     const fontSize = n.fontSize || 12;
-    const tc = n.textColor || (lightOrDark(fill)==="dark"?"#f4f2ea":"#0c0b09");
+    const tc = n.textColor || (lightOrDark(fill)==="dark"?t.text:"#0c0b09");
     svg += `<text x="${n.x+n.w/2}" y="${n.y+n.h/2+5}" text-anchor="middle" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
   });
 
@@ -1042,6 +1240,7 @@ function shapeToSvgStr(node, fill, stroke) {
     case "person": { const hr=w*.28,hcy=y+hr+2; return `<g ${fa} ${sa}><circle cx="${cx}" cy="${hcy}" r="${hr}"/><path d="M${x+w*.08} ${y+h}Q${x+w*.08} ${hcy+hr*1.6} ${cx} ${hcy+hr*1.6}Q${x+w*.92} ${hcy+hr*1.6} ${x+w*.92} ${y+h}"/></g>`; }
     case "rounded": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="18" ${fa} ${sa}/>`;
     case "text": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="transparent"/>`;
+    case "image": return node.imageData ? `<image href="${node.imageData}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>` : "";
     default: return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ${fa} ${sa}/>`;
   }
 }
@@ -1053,7 +1252,7 @@ function shapeToSvgStr(node, fill, stroke) {
 async function save() {
   const saved = await storage.diagrams.save({
     id: S.id, name: S.name,
-    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null})),
+    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null,imageData:imageData||null})),
     connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled",fromPt:fromPt||null,toPt:toPt||null})),
   });
   S.id = saved.id;
