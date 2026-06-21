@@ -12,7 +12,7 @@
  * ----------------------------------------------------------------
  */
 
-const CACHE_VERSION = "2.9.0";
+const CACHE_VERSION = "2.9.1";
 const CACHE_NAME = `architectsmartcraft-v${CACHE_VERSION}`;
 
 const APP_SHELL_FILES = [
@@ -38,6 +38,16 @@ self.addEventListener("install", (event) => {
     caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL_FILES))
   );
   self.skipWaiting();
+});
+
+// Allows the page (main.js) to force this worker to activate immediately
+// instead of waiting for all tabs to close — see registerServiceWorker()
+// in main.js. This is what makes new releases land same-day instead of
+// being silently throttled by the browser's update-check timer.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (event) => {
