@@ -12,6 +12,7 @@
  * ----------------------------------------------------------------
  */
 import storage from "../../js/storage.js";
+import { loadApiConfig } from "../settings/settings.js";
 
 // ================================================================
 // CONSTANTS
@@ -205,9 +206,14 @@ const TB = {
   theme:   `<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>`,
   copy:    `<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/>`,
   paste:   `<rect x="6" y="3" width="12" height="6" rx="1"/><rect x="4" y="9" width="16" height="12" rx="2"/>`,
+  rename:  `<path d="M11 4H4v16h16v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/>`,
+  exprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 3v12"/><path d="M16 7l-4-4-4 4"/>`,
+  imprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 15V3"/><path d="M8 11l4 4 4-4"/>`,
 };
 
 function buildToolbar() {
+  const hasSel = !!S.sel;
+  const hasNode = hasSel && S.sel.k === "node";
   el.toolbar.innerHTML = [
     tbBtn("tb-zo", TB.zoomOut, "Zoom out"),
     tbBtn("tb-zi", TB.zoomIn,  "Zoom in"),
@@ -221,10 +227,13 @@ function buildToolbar() {
     tbBtn("tb-tx", TB.text,  "Text tool", false, S.tool==="text"),
     tbBtn("tb-th", TB.theme, "Canvas theme"),
     tbSep(),
-    tbBtn("tb-cp", TB.copy,  "Copy", !S.sel || S.sel.k !== "node"),
+    tbBtn("tb-rn", TB.rename,"Rename", !hasNode),
+    tbBtn("tb-cp", TB.copy,  "Copy", !hasNode),
     tbBtn("tb-ps", TB.paste, "Paste", !S._clipboard),
-    tbBtn("tb-del",TB.trash, "Delete", !S.sel),
+    tbBtn("tb-del",TB.trash, "Delete", !hasSel),
     tbSep(),
+    tbBtn("tb-ex", TB.exprt, "Export diagram"),
+    tbBtn("tb-im", TB.imprt, "Import diagram / image"),
     tbBtn("tb-dl", TB.dl,    "Download PNG"),
   ].join("");
 
@@ -237,9 +246,12 @@ function buildToolbar() {
   on("tb-br",  openColorPopup);
   on("tb-tx",  toggleTextTool);
   on("tb-th",  openThemePopup);
+  on("tb-rn",  handleRename);
   on("tb-cp",  copyNode);
   on("tb-ps",  pasteNode);
   on("tb-del", deleteSel);
+  on("tb-ex",  exportDiagram);
+  on("tb-im",  importDiagram);
   on("tb-dl",  downloadPng);
 }
 function on(id, fn) { document.getElementById(id).addEventListener("click", fn); }
@@ -528,10 +540,6 @@ function openColorPopup() {
 }
 
 // ================================================================
-// DRAWING — MAIN RENDER
-// ================================================================
-
-// ================================================================
 // THEME
 // ================================================================
 
@@ -661,6 +669,133 @@ function addImageShape(csId) {
   };
   S.nodes.push(node);
   setSel({ k: "node", id: node.id });
+}
+
+// ================================================================
+// RENAME (toolbar button — reliable, no double-tap needed)
+// ================================================================
+
+function handleRename() {
+  if (!S.sel || S.sel.k !== "node") return;
+  const node = S.nodes.find(n => n.id === S.sel.id);
+  if (node) renameNode(node);
+}
+
+// ================================================================
+// EXPORT / IMPORT DIAGRAM
+// ================================================================
+
+function exportDiagram() {
+  const data = {
+    format: "ArchitectSmartCraft", version: "2.5",
+    name: S.name, theme: S.theme,
+    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})=>({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})),
+    conns: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})=>({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${(S.name||"diagram").replace(/[^a-z0-9_-]/gi,"_")}.asc.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("Diagram exported");
+}
+
+function importDiagram() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json,.asc.json,image/*";
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.type.startsWith("image/")) await importFromImage(file);
+    else await importFromJson(file);
+  });
+  input.click();
+}
+
+async function importFromJson(file) {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (data.format !== "ArchitectSmartCraft") { toast("Not a valid diagram file"); return; }
+    snap();
+    S.name = data.name || "Imported";
+    S.nodes = data.nodes || [];
+    S.conns = (data.conns || []).map(c => ({ ...c, wp: c.wp || [] }));
+    if (data.theme && THEMES.find(t => t.key === data.theme)) S.theme = data.theme;
+    el.name.value = S.name;
+    applyTheme(); draw(); fitView(); buildToolbar();
+    toast("Diagram imported");
+  } catch (e) { toast("Import failed: " + e.message); }
+}
+
+async function importFromImage(file) {
+  const { provider, apiKey } = await loadApiConfig();
+  const base64 = await fileToBase64(file);
+
+  if (!provider || !apiKey) {
+    snap();
+    const vis = visBounds();
+    S.nodes.push({ id: uid("n"), type: "image", label: file.name, x: vis.x+20, y: vis.y+20, w: 400, h: 300, fill: null, imageData: base64 });
+    draw(); buildToolbar();
+    toast("Image added as reference (set an AI key in Settings to auto-convert to diagram)");
+    return;
+  }
+
+  toast("Analyzing image...");
+
+  try {
+    const dj = await convertImageToDiagram(provider, apiKey, base64);
+    if (!dj) { toast("Could not parse diagram from image"); return; }
+    snap();
+    S.name = dj.name || file.name.replace(/\.\w+$/, "");
+    el.name.value = S.name;
+    const idMap = {};
+    (dj.nodes || []).forEach(n => {
+      const id = uid("n"); idMap[n.id || n.label] = id;
+      S.nodes.push({ id, type: n.type||"rect", label: n.label||"", x: n.x||0, y: n.y||0, w: n.w||120, h: n.h||60, fill: n.fill||null });
+    });
+    (dj.connectors || []).forEach(c => {
+      const fromId = idMap[c.from]||idMap[c.from_label];
+      const toId = idMap[c.to]||idMap[c.to_label];
+      if (fromId && toId) S.conns.push({ id: uid("c"), from: fromId, to: toId, style: c.style||"straight", wp: [], startArrow:"none", endArrow:"filled" });
+    });
+    draw(); fitView(); buildToolbar();
+    toast(`Converted: ${S.nodes.length} shapes, ${S.conns.length} connections`);
+  } catch (e) {
+    console.error("AI conversion failed:", e);
+    snap();
+    const vis = visBounds();
+    S.nodes.push({ id: uid("n"), type: "image", label: file.name, x: vis.x+20, y: vis.y+20, w: 400, h: 300, fill: null, imageData: base64 });
+    draw(); buildToolbar();
+    toast("AI conversion failed — added as reference image. " + e.message);
+  }
+}
+
+async function convertImageToDiagram(provider, apiKey, imageBase64) {
+  const prompt = `Analyze this architecture/flow diagram image. Return ONLY valid JSON (no markdown, no backticks) with this structure:
+{"name":"title","nodes":[{"id":"1","label":"Name","type":"rect","x":100,"y":50,"w":120,"h":60,"fill":null}],"connectors":[{"from":"1","to":"2","style":"straight"}]}
+Rules: type=rect|rounded|ellipse|diamond|cylinder|cloud|hexagon|parallelogram|triangle|callout|text. Positions on 0-1000 x 0-800 grid matching layout. fill=hex color or null. style=straight|curved|orthogonal. Every node needs unique id. connectors reference node ids.`;
+
+  let res;
+  if (provider === "groq") {
+    res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${apiKey}`},
+      body: JSON.stringify({model:"llama-3.2-90b-vision-preview",messages:[{role:"user",content:[{type:"text",text:prompt},{type:"image_url",image_url:{url:imageBase64}}]}]}),
+    });
+  } else if (provider === "mistral") {
+    res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+      method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${apiKey}`},
+      body: JSON.stringify({model:"pixtral-12b-2409",messages:[{role:"user",content:[{type:"text",text:prompt},{type:"image_url",image_url:imageBase64}]}]}),
+    });
+  } else { throw new Error("Vision not supported by " + provider); }
+
+  if (!res.ok) throw new Error(`API error (${res.status})`);
+  const data = await res.json();
+  const text = data.choices[0].message.content;
+  return JSON.parse(text.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim());
 }
 
 // ================================================================
