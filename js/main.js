@@ -53,8 +53,44 @@ function initFromHash() {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch((err) => {
-        console.warn("Service worker registration failed:", err);
+      navigator.serviceWorker
+        .register("./sw.js")
+        .then((registration) => {
+          // Force a byte-comparison check against the live sw.js on every
+          // page load, bypassing the browser's normal 24h throttle on SW
+          // update checks. Cheap (one small file fetch) and guarantees
+          // new releases are picked up the same day they're deployed.
+          registration.update().catch(() => {});
+
+          // If a new worker is already waiting (e.g. from a previous load
+          // that didn't get claimed), activate it immediately and reload
+          // once so the user is never stuck on stale JS.
+          if (registration.waiting) {
+            registration.waiting.postMessage({ type: "SKIP_WAITING" });
+          }
+
+          registration.addEventListener("updatefound", () => {
+            const newWorker = registration.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener("statechange", () => {
+              if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                // A new version has installed and is waiting — claim it now.
+                newWorker.postMessage({ type: "SKIP_WAITING" });
+              }
+            });
+          });
+        })
+        .catch((err) => {
+          console.warn("Service worker registration failed:", err);
+        });
+
+      // Reload once when the new SW takes control, so the page picks up
+      // the new module files instead of running with stale cached ones.
+      let hasReloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hasReloaded) return;
+        hasReloaded = true;
+        window.location.reload();
       });
     });
   }
