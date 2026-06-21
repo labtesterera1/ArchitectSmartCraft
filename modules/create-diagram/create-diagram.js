@@ -66,11 +66,11 @@ const MAX_ZOOM  = 3;
 const MAX_UNDO  = 60;
 
 const THEMES = [
-  { key:"dark",      label:"Dark",      bg:"#0c0b09", grid:"rgba(212,255,58,0.06)", stroke:"#d4ff3a", fill:"#0a0907", text:"#f4f2ea", border:"rgba(212,255,58,0.18)" },
-  { key:"light",     label:"Light",     bg:"#ffffff", grid:"rgba(0,0,0,0.07)",       stroke:"#333333", fill:"#ffffff", text:"#222222", border:"rgba(0,0,0,0.15)" },
-  { key:"blueprint", label:"Blueprint", bg:"#1a3a5c", grid:"rgba(100,180,255,0.12)", stroke:"#88ccff", fill:"#1a3a5c", text:"#e8f0ff", border:"rgba(100,180,255,0.25)" },
-  { key:"warm",      label:"Warm",      bg:"#2d2418", grid:"rgba(255,200,80,0.08)",  stroke:"#ffc850", fill:"#2d2418", text:"#f5e6c8", border:"rgba(255,200,80,0.2)" },
-  { key:"white",     label:"Clean",     bg:"#f8f8f8", grid:"rgba(0,0,0,0.05)",       stroke:"#555555", fill:"#f8f8f8", text:"#111111", border:"rgba(0,0,0,0.12)" },
+  { key:"dark",      label:"Dark",      bg:"#0c0b09", grid:"rgba(212,255,58,0.06)", stroke:"#d4ff3a", fill:"#0a0907", text:"#f4f2ea", border:"rgba(212,255,58,0.18)", sel:"#5ab8ff", handle:"#d4ff3a" },
+  { key:"light",     label:"Light",     bg:"#ffffff", grid:"rgba(0,0,0,0.07)",       stroke:"#333333", fill:"#ffffff", text:"#222222", border:"rgba(0,0,0,0.15)",       sel:"#0066cc", handle:"#333333" },
+  { key:"blueprint", label:"Blueprint", bg:"#1a3a5c", grid:"rgba(100,180,255,0.12)", stroke:"#88ccff", fill:"#1a3a5c", text:"#e8f0ff", border:"rgba(100,180,255,0.25)", sel:"#ffd700", handle:"#88ccff" },
+  { key:"warm",      label:"Warm",      bg:"#2d2418", grid:"rgba(255,200,80,0.08)",  stroke:"#ffc850", fill:"#2d2418", text:"#f5e6c8", border:"rgba(255,200,80,0.2)",   sel:"#5ab8ff", handle:"#ffc850" },
+  { key:"white",     label:"Clean",     bg:"#f8f8f8", grid:"rgba(0,0,0,0.05)",       stroke:"#555555", fill:"#f8f8f8", text:"#111111", border:"rgba(0,0,0,0.12)",       sel:"#0066cc", handle:"#555555" },
 ];
 
 // ================================================================
@@ -151,6 +151,7 @@ function buildShell(container) {
         <g id="dd-vp"></g>
       </svg>
       <div id="dd-float" class="hidden" style="position:absolute;display:flex;gap:2px;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:4px;transform:translate(-50%,-120%);z-index:5"></div>
+      <div id="dd-conn-bar" class="hidden" style="position:absolute;top:6px;left:6px;right:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:5px 8px;z-index:5;font-size:10px"></div>
       <div id="dd-zoom-label" style="position:absolute;bottom:8px;right:8px;font-size:11px;color:var(--color-text-tertiary);background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:4px;padding:3px 7px;cursor:pointer">100%</div>
     </div>
   </div>
@@ -163,6 +164,7 @@ function buildShell(container) {
   el.popup   = document.getElementById("dd-popup");
   el.palette = document.getElementById("dd-palette");
   el.float   = document.getElementById("dd-float");
+  el.connBar = document.getElementById("dd-conn-bar");
   el.saved   = document.getElementById("dd-saved");
   el.name    = document.getElementById("dd-name");
   el.zoomLbl = document.getElementById("dd-zoom-label");
@@ -466,9 +468,9 @@ function placeText(evt) {
   el.svg.style.cursor = "grab";
   setSel({ k: "node", id: node.id });
   buildToolbar();
-  const newLabel = prompt("Enter text:", node.label);
-  if (newLabel !== null && newLabel.trim()) node.label = newLabel.trim();
   draw();
+  // Open inline editor immediately
+  setTimeout(() => renameNode(node), 50);
 }
 
 // ================================================================
@@ -556,11 +558,12 @@ function openThemePopup() {
 function applyTheme() {
   const t = theme();
   const wrap = document.getElementById("dd-canvas-wrap");
-  if (wrap) wrap.style.background = t.bg;
-  // Update grid pattern
+  if (wrap) {
+    wrap.style.background = t.bg;
+    wrap.style.border = `2px solid ${t.border}`;
+  }
   const gridPath = el.svg.querySelector("#grid path");
   if (gridPath) gridPath.setAttribute("stroke", t.grid);
-  // Update all markers to use theme stroke color
   el.svg.querySelectorAll("[id^='ah']").forEach(m => {
     m.querySelectorAll("polygon").forEach(p => { if(p.getAttribute("fill")!=="#fff") p.setAttribute("fill", t.stroke); });
     m.querySelectorAll("circle").forEach(c => { if(c.getAttribute("fill")!=="#fff") c.setAttribute("fill", t.stroke); });
@@ -691,7 +694,7 @@ function drawNode(node) {
       const border = svgEl("rect");
       border.setAttribute("x", node.x); border.setAttribute("y", node.y);
       border.setAttribute("width", node.w); border.setAttribute("height", node.h);
-      border.setAttribute("fill", "none"); border.setAttribute("stroke", "#fff");
+      border.setAttribute("fill", "none"); border.setAttribute("stroke", t.sel);
       border.setAttribute("stroke-width", "2.5"); border.setAttribute("stroke-dasharray", "4 2");
       border.setAttribute("rx", "4");
       g.appendChild(border);
@@ -702,7 +705,7 @@ function drawNode(node) {
     const fill = node.type === "text" ? "transparent" : (node.fill || t.fill);
     shape.setAttribute("fill", fill);
     if (node.type !== "text") {
-      shape.setAttribute("stroke", isSel ? "#fff" : t.stroke);
+      shape.setAttribute("stroke", isSel ? t.sel : t.stroke);
       shape.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
     }
   }
@@ -732,7 +735,7 @@ function drawNode(node) {
       const dot = svgEl("circle");
       dot.setAttribute("cx", h.x); dot.setAttribute("cy", h.y);
       dot.setAttribute("r", HANDLE_R);
-      dot.setAttribute("fill", "#0c0b09"); dot.setAttribute("stroke", "#d4ff3a"); dot.setAttribute("stroke-width", "1.5");
+      dot.setAttribute("fill", theme().bg); dot.setAttribute("stroke", theme().handle); dot.setAttribute("stroke-width", "1.5");
       dot.style.cursor = "crosshair"; dot.style.opacity = "0.8";
       dot.addEventListener("mousedown", e => { e.stopPropagation(); startConnect(node.id, e); });
       dot.addEventListener("touchstart", e => { e.stopPropagation(); startConnect(node.id, e); }, {passive:true});
@@ -774,8 +777,35 @@ function drawNode(node) {
 }
 
 function renameNode(node) {
-  const v = prompt("Rename:", node.label);
-  if (v !== null && v.trim()) { snap(); node.label = v.trim(); draw(); buildToolbar(); }
+  // Create an inline editable input positioned over the node on the canvas
+  const wrap = document.getElementById("dd-canvas-wrap");
+  const sx = (node.x + node.w/2) * S.zoom + S.pan.x;
+  const sy = (node.y + node.h/2) * S.zoom + S.pan.y;
+  const t = theme();
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = node.label;
+  input.style.cssText = `position:absolute;left:${sx}px;top:${sy}px;transform:translate(-50%,-50%);
+    font-family:JetBrains Mono,monospace;font-size:${(node.fontSize||12)*S.zoom}px;
+    text-align:center;background:${t.bg};color:${t.text};
+    border:2px solid ${t.sel};border-radius:4px;padding:2px 6px;
+    outline:none;z-index:10;min-width:40px;max-width:${node.w*S.zoom+40}px`;
+  wrap.appendChild(input);
+  input.focus();
+  input.select();
+
+  const finish = () => {
+    const v = input.value.trim();
+    if (v && v !== node.label) { snap(); node.label = v; }
+    input.remove();
+    draw(); buildToolbar();
+  };
+  input.addEventListener("blur", finish);
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+    if (e.key === "Escape") { input.value = node.label; input.blur(); }
+  });
 }
 
 function showNodeFloat(node) {
@@ -819,7 +849,7 @@ function showTextFloat(node) {
     e.stopPropagation(); snap(); node.textColor = b.dataset.txclr || null; draw();
   }));
 }
-function hideFloat() { el.float && el.float.classList.add("hidden"); }
+function hideFloat() { el.float && el.float.classList.add("hidden"); el.connBar && el.connBar.classList.add("hidden"); }
 
 // ================================================================
 // DRAW CONNECTOR
@@ -868,7 +898,7 @@ function drawConn(conn) {
   // visible line
   const line = svgEl("path");
   line.setAttribute("d", d); line.setAttribute("fill", "none");
-  line.setAttribute("stroke", isSel ? "#fff" : theme().stroke);
+  line.setAttribute("stroke", isSel ? theme().sel : theme().stroke);
   line.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
   const endArrow = conn.endArrow || "filled";
   const startArrow = conn.startArrow || "none";
@@ -899,7 +929,7 @@ function drawEndpointDot(g, pt, conn, ptKey, isSel) {
   dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y);
   dot.setAttribute("r", isSel ? 8 : 6);
   dot.setAttribute("fill", isStart ? "#4ee08a" : "#5ab8ff");
-  dot.setAttribute("stroke", "#0c0b09"); dot.setAttribute("stroke-width", "2");
+  dot.setAttribute("stroke", theme().bg); dot.setAttribute("stroke-width", "2");
   dot.style.cursor = isSel ? "grab" : "pointer";
 
   if (isSel) {
@@ -912,20 +942,24 @@ function drawEndpointDot(g, pt, conn, ptKey, isSel) {
     const mv = e => {
       e.preventDefault(); const p = svgPt(e);
       if (Math.abs(p.x - start.x) > 2 || Math.abs(p.y - start.y) > 2) moved = true;
+      // Keep as freeform point during drag — don't snap mid-drag
       conn[ptKey] = { x: p.x, y: p.y };
-      // Snap to a box if dragged onto one
-      const snapNode = nodeAt(p);
-      if (snapNode) {
-        if (ptKey === "fromPt") { conn.from = snapNode.id; conn.fromPt = null; }
-        else { conn.to = snapNode.id; conn.toPt = null; }
-      } else {
-        if (ptKey === "fromPt") { conn.from = null; }
-        else { conn.to = null; }
-      }
+      if (ptKey === "fromPt") conn.from = null;
+      else conn.to = null;
       draw();
     };
-    const up = () => {
-      if (moved && pre) { S.undo.push(pre); if (S.undo.length > MAX_UNDO) S.undo.shift(); S.redo = []; buildToolbar(); }
+    const up = e => {
+      if (moved) {
+        // Snap to box only on release
+        const endP = svgPt(e.changedTouches ? e.changedTouches[0] : e);
+        const snapNode = nodeAt(endP);
+        if (snapNode) {
+          if (ptKey === "fromPt") { conn.from = snapNode.id; conn.fromPt = null; }
+          else { conn.to = snapNode.id; conn.toPt = null; }
+        }
+        if (pre) { S.undo.push(pre); if (S.undo.length > MAX_UNDO) S.undo.shift(); S.redo = []; }
+        draw(); buildToolbar();
+      }
       start = null; pre = null; off(mv, up);
     };
     dot.addEventListener("mousedown", dn);
@@ -937,47 +971,40 @@ function drawEndpointDot(g, pt, conn, ptKey, isSel) {
 }
 
 function showConnFloat(p1, p2, conn) {
-  const mx = (p1.x+p2.x)/2*S.zoom+S.pan.x;
-  const my = (p1.y+p2.y)/2*S.zoom+S.pan.y;
-  el.float.style.left = mx+"px"; el.float.style.top = my+"px";
-  el.float.classList.remove("hidden");
-
+  // Show connector options in fixed bar at top of canvas (not floating over the line)
+  const t = theme();
   const curStyle = conn.style || "straight";
   const curEnd = conn.endArrow || "filled";
   const curStart = conn.startArrow || "none";
 
-  el.float.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:4px">
-      <div style="display:flex;gap:2px">
-        ${LINE_STYLES.map(ls =>
-          `<button class="btn${curStyle===ls.key?" btn-primary":""}" data-fls="${ls.key}" style="padding:3px 6px;font-size:10px;border:none;line-height:0" title="${ls.label}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">${ls.icon}</svg></button>`
-        ).join("")}
-      </div>
-      <div style="display:flex;gap:2px;align-items:center">
-        <span style="font-size:9px;color:var(--color-text-tertiary);width:28px">Start</span>
-        ${ARROW_TYPES.map(at =>
-          `<button class="btn${curStart===at.key?" btn-primary":""}" data-fsa="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
-        ).join("")}
-      </div>
-      <div style="display:flex;gap:2px;align-items:center">
-        <span style="font-size:9px;color:var(--color-text-tertiary);width:28px">End</span>
-        ${ARROW_TYPES.map(at =>
-          `<button class="btn${curEnd===at.key?" btn-primary":""}" data-fea="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
-        ).join("")}
-      </div>
-    </div>
+  el.connBar.classList.remove("hidden");
+  el.connBar.innerHTML = `
+    <span style="color:${t.text};opacity:0.6;margin-right:4px">Line:</span>
+    ${LINE_STYLES.map(ls =>
+      `<button class="btn${curStyle===ls.key?" btn-primary":""}" data-fls="${ls.key}" style="padding:3px 6px;border:none;line-height:0" title="${ls.label}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">${ls.icon}</svg></button>`
+    ).join("")}
+    <div style="width:1px;height:18px;background:${t.border};margin:0 4px"></div>
+    <span style="color:${t.text};opacity:0.6">Start:</span>
+    ${ARROW_TYPES.map(at =>
+      `<button class="btn${curStart===at.key?" btn-primary":""}" data-fsa="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
+    ).join("")}
+    <div style="width:1px;height:18px;background:${t.border};margin:0 4px"></div>
+    <span style="color:${t.text};opacity:0.6">End:</span>
+    ${ARROW_TYPES.map(at =>
+      `<button class="btn${curEnd===at.key?" btn-primary":""}" data-fea="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
+    ).join("")}
   `;
 
-  el.float.querySelectorAll("[data-fls]").forEach(b => b.addEventListener("click", e => {
+  el.connBar.querySelectorAll("[data-fls]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation(); snap(); conn.style = b.dataset.fls; draw();
   }));
-  el.float.querySelectorAll("[data-fsa]").forEach(b => b.addEventListener("click", e => {
+  el.connBar.querySelectorAll("[data-fsa]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation(); snap(); conn.startArrow = b.dataset.fsa; draw();
   }));
-  el.float.querySelectorAll("[data-fea]").forEach(b => b.addEventListener("click", e => {
+  el.connBar.querySelectorAll("[data-fea]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation(); snap(); conn.endArrow = b.dataset.fea; draw();
   }));
 }
@@ -1015,7 +1042,7 @@ function drawWpHandle(g, conn, wp, idx) {
   const dot = svgEl("circle");
   dot.setAttribute("cx",wp.x); dot.setAttribute("cy",wp.y);
   dot.setAttribute("r", isActive?7:5);
-  dot.setAttribute("fill","#fff"); dot.setAttribute("stroke",isActive?"#d4ff3a":"#0c0b09");
+  dot.setAttribute("fill","#fff"); dot.setAttribute("stroke",isActive?theme().handle:theme().bg);
   dot.setAttribute("stroke-width",isActive?"2.5":"1.5");
   dot.style.cursor = "grab";
 
