@@ -4,7 +4,7 @@
  * CreateDiagram — draw.io-style diagram editor, built from scratch.
  *
  * Layout: top toolbar | left palette | main SVG canvas with grid
- * Features: 13 shapes, fill colors, connector styles (straight/
+ * Features: 31 shapes, fill colors, connector styles (straight/
  * curved/orthogonal), draggable waypoints with visible +/× controls,
  * text tool, undo/redo, zoom/pan, fit-to-view, PNG export, save/load.
  *
@@ -39,6 +39,17 @@ const SHAPES = [
   { type: "lock",          label: "Lock",        w: 70,  h: 90,  icon: `<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>` },
   { type: "play",          label: "Play",        w: 80,  h: 80,  icon: `<polygon points="6,4 20,12 6,20"/>` },
   { type: "api",           label: "API",         w: 90,  h: 60,  icon: `<rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 14V10l2 2 2-2v4M14 10h2.5a1.5 1.5 0 0 1 0 3H14" fill="none"/>` },
+  { type: "chevron",       label: "Chevron",     w: 140, h: 80,  icon: `<path d="M3 5h12l5 7-5 7H3l5-7z"/>` },
+  { type: "arrowUp",       label: "Arrow",       w: 90,  h: 90,  icon: `<line x1="5" y1="19" x2="18" y2="6"/><path d="M10 6h8v8"/>` },
+  { type: "list",          label: "List",        w: 160, h: 130, icon: `<rect x="3" y="4" width="18" height="16" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="6" y1="13" x2="16" y2="13"/><line x1="6" y1="17" x2="14" y2="17"/>` },
+  { type: "speechRect",    label: "Speech box",  w: 140, h: 90,  icon: `<path d="M3 4h18v11H11l-4 5v-5H3z"/>` },
+  { type: "smiley",        label: "Smiley",      w: 110, h: 110, icon: `<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/><path d="M8 14.5c1 1.3 2.4 2 4 2s3-.7 4-2" fill="none"/>` },
+  { type: "elbow",         label: "Elbow",       w: 110, h: 110, icon: `<path d="M5 20h6l9-13"/><circle cx="20" cy="5" r="1.4"/>` },
+  { type: "relationship",  label: "Relation",    w: 170, h: 70,  icon: `<polygon points="12,12 22,4 35,12 22,20" transform="translate(-9,0) scale(0.62)"/><line x1="2" y1="12" x2="22" y2="12"/>` },
+  { type: "envelope",      label: "Envelope",    w: 110, h: 75,  icon: `<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 6l9 7 9-7"/>` },
+  { type: "check",         label: "Check",       w: 90,  h: 90,  icon: `<path d="M4 13l5 6L20 5"/>` },
+  { type: "doubleArrow",   label: "2-way arrow", w: 140, h: 60,  icon: `<line x1="3" y1="12" x2="21" y2="12"/><path d="M3 12l4-4M3 12l4 4"/><path d="M21 12l-4-4M21 12l-4 4"/>` },
+  { type: "banner",        label: "Banner",      w: 150, h: 90,  icon: `<path d="M3 4h18v11c-2-2-4 2-6 0s-4 2-6 0-4 2-6 0z"/>` },
 ];
 
 const COLORS = [
@@ -101,6 +112,7 @@ function newState() {
     lineStyle: "straight", // default for new connectors
     pendingColor: null,
     theme: "dark",         // canvas theme key
+    exportBorder: true,    // draw a border frame around downloaded PNG
   };
 }
 
@@ -114,6 +126,8 @@ export async function initCreateDiagramView(container) {
   S = newState();
   const savedTheme = await storage.settings.get("diagramTheme");
   if (savedTheme && THEMES.find(t => t.key === savedTheme)) S.theme = savedTheme;
+  const savedBorder = await storage.settings.get("exportBorder");
+  if (typeof savedBorder === "boolean") S.exportBorder = savedBorder;
   const savedShapes = await storage.settings.get("customShapes");
   if (Array.isArray(savedShapes)) customShapes = savedShapes;
   buildShell(container);
@@ -570,13 +584,22 @@ function openColorPopup() {
 
 function openThemePopup() {
   if (!el.popup.classList.contains("hidden")) { closePopup(); return; }
+  renderThemePopup();
+  el.popup.classList.remove("hidden");
+}
+
+function renderThemePopup() {
   el.popup.style.left = document.getElementById("tb-th").offsetLeft + "px";
   el.popup.innerHTML = `<div style="display:flex;flex-direction:column;gap:3px">${
     THEMES.map(t => `<button class="btn${S.theme===t.key?" btn-primary":""}" data-theme="${t.key}" style="padding:6px 12px;display:flex;gap:8px;align-items:center;border:none">
       <span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:${t.bg};border:2px solid ${t.stroke}"></span>
       <span style="font-size:11px">${t.label}</span></button>`).join("")
-  }</div>`;
-  el.popup.classList.remove("hidden");
+  }<div style="border-top:1px solid var(--color-border);margin-top:4px;padding-top:6px">
+    <button class="btn" id="dd-export-border-toggle" style="padding:6px 12px;display:flex;gap:8px;align-items:center;border:none;width:100%">
+      <span style="display:inline-flex;width:18px;height:18px;border-radius:4px;align-items:center;justify-content:center;border:2px solid var(--color-text-tertiary)">${S.exportBorder?"✓":""}</span>
+      <span style="font-size:11px">Border on download</span>
+    </button>
+  </div></div>`;
   el.popup.querySelectorAll("[data-theme]").forEach(b => b.addEventListener("click", async e => {
     e.stopPropagation();
     S.theme = b.dataset.theme;
@@ -586,7 +609,14 @@ function openThemePopup() {
     draw();
     buildToolbar();
   }));
+  document.getElementById("dd-export-border-toggle").addEventListener("click", async e => {
+    e.stopPropagation();
+    S.exportBorder = !S.exportBorder;
+    await storage.settings.set("exportBorder", S.exportBorder);
+    renderThemePopup();
+  });
 }
+
 
 function applyTheme() {
   const t = theme();
@@ -875,7 +905,7 @@ function drawNode(node) {
   if (node.type !== "image") {
     const txt = svgEl("text");
     txt.setAttribute("x", node.x + node.w/2);
-    txt.setAttribute("y", node.y + node.h/2 + 5);
+    txt.setAttribute("y", labelY(node));
     txt.setAttribute("text-anchor", "middle");
     const fontSize = node.fontSize || 12;
     const t = theme();
@@ -1314,6 +1344,11 @@ function attachDrag(g, node) {
 // SHAPE GEOMETRY (shared by canvas + PNG export)
 // ================================================================
 
+function labelY(node) {
+  if (node.type === "list") return node.y + Math.min(node.h*.22, 32)/2 + 4;
+  return node.y + node.h/2 + 5;
+}
+
 function buildShape(node) {
   const {x,y,w,h,type} = node;
   const cx=x+w/2, cy=y+h/2;
@@ -1364,6 +1399,61 @@ function buildShape(node) {
     }
     case "play":          return mkEl("polygon",{points:`${x+w*.2},${y+h*.1} ${x+w*.85},${cy} ${x+w*.2},${y+h*.9}`});
     case "api":           return mkEl("rect",{x,y,width:w,height:h,rx:8});
+    case "chevron":       { const c=Math.min(w*.28,40); return mkEl("polygon",{points:`${x},${y} ${x+w-c},${y} ${x+w},${cy} ${x+w-c},${y+h} ${x},${y+h} ${x+c},${cy}`}); }
+    case "arrowUp": {
+      const g=svgEl("g"), tw=w*.32, sh=h*.32, ax=x+w*.05, ay=y+h*.95, bx=x+w*.95, by=y+h*.05;
+      g.appendChild(mkEl("line",{x1:ax,y1:ay,x2:bx,y2:by}));
+      g.appendChild(mkEl("polyline",{points:`${bx-tw},${by} ${bx},${by} ${bx},${by+tw}`,fill:"none"}));
+      return g;
+    }
+    case "list": {
+      const g=svgEl("g"), hh=Math.min(h*.22,32);
+      g.appendChild(mkEl("rect",{x,y,width:w,height:h,rx:2}));
+      g.appendChild(mkEl("line",{x1:x,y1:y+hh,x2:x+w,y2:y+hh}));
+      const rows=3, rh=(h-hh)/rows;
+      for(let i=1;i<rows;i++) g.appendChild(mkEl("line",{x1:x,y1:y+hh+rh*i,x2:x+w,y2:y+hh+rh*i,"stroke-width":"0.75",opacity:"0.5"}));
+      for(let i=0;i<rows;i++) {
+        const t=mkEl("text",{x:x+14,y:y+hh+rh*i+rh/2+4,"font-size":"11","font-family":"JetBrains Mono,monospace","stroke-width":"0"});
+        t.textContent = `Item ${i+1}`;
+        g.appendChild(t);
+      }
+      return g;
+    }
+    case "speechRect":    { const bH=h*.78, tw=w*.16, tx=x+w*.22; return mkEl("path",{d:`M${x} ${y}H${x+w}V${y+bH}H${tx+tw}L${tx} ${y+h}V${y+bH}H${x}Z`}); }
+    case "smiley": {
+      const r=Math.min(w,h)/2, g=svgEl("g");
+      g.appendChild(mkEl("circle",{cx,cy,r}));
+      g.appendChild(mkEl("ellipse",{cx:cx-r*.35,cy:cy-r*.15,rx:r*.09,ry:r*.13,fill:"currentColor"}));
+      g.appendChild(mkEl("ellipse",{cx:cx+r*.35,cy:cy-r*.15,rx:r*.09,ry:r*.13,fill:"currentColor"}));
+      g.appendChild(mkEl("path",{d:`M${cx-r*.45} ${cy+r*.15}Q${cx} ${cy+r*.65} ${cx+r*.45} ${cy+r*.15}`,fill:"none"}));
+      return g;
+    }
+    case "elbow": {
+      const g=svgEl("g"), ax=x+w*.1, ay=y+h*.95, mx=x+w*.45, my=y+h*.95, bx=x+w*.95, by=y+h*.08;
+      g.appendChild(mkEl("path",{d:`M${ax} ${ay}H${mx}L${bx} ${by}`,fill:"none"}));
+      g.appendChild(mkEl("circle",{cx:bx,cy:by,r:3,fill:"none"}));
+      return g;
+    }
+    case "relationship": {
+      const g=svgEl("g"), dw=w*.5, half=h/2;
+      g.appendChild(mkEl("line",{x1:x,y1:cy,x2:x+w,y2:cy}));
+      g.appendChild(mkEl("polygon",{points:`${cx-dw/2},${cy} ${cx},${y} ${cx+dw/2},${cy} ${cx},${y+h}`}));
+      return g;
+    }
+    case "envelope": { const g=svgEl("g"); g.appendChild(mkEl("rect",{x,y,width:w,height:h,rx:2})); g.appendChild(mkEl("path",{d:`M${x} ${y}L${cx} ${y+h*.55}L${x+w} ${y}`,fill:"none"})); return g; }
+    case "check":         return mkEl("path",{d:`M${x+w*.12} ${y+h*.55}L${x+w*.4} ${y+h*.85}L${x+w*.9} ${y+h*.12}`,fill:"none"});
+    case "doubleArrow": {
+      const g=svgEl("g"), tw=Math.min(h*.45,26), hx=Math.min(w*.18,34);
+      g.appendChild(mkEl("line",{x1:x+hx,y1:cy,x2:x+w-hx,y2:cy}));
+      g.appendChild(mkEl("polygon",{points:`${x+hx},${y} ${x},${cy} ${x+hx},${y+h}`}));
+      g.appendChild(mkEl("polygon",{points:`${x+w-hx},${y} ${x+w},${cy} ${x+w-hx},${y+h}`}));
+      return g;
+    }
+    case "banner": {
+      const bh=h*.8;
+      const d=`M${x} ${y}H${x+w}V${y+bh}C${x+w*.75} ${y+h} ${x+w*.6} ${y+bh-h*.12} ${x+w*.42} ${y+bh}C${x+w*.28} ${y+bh+h*.1} ${x+w*.12} ${y+h} ${x} ${y+bh}Z`;
+      return mkEl("path",{d});
+    }
     default:              return mkEl("rect",{x,y,width:w,height:h,rx:6});
   }
 }
@@ -1399,6 +1489,10 @@ async function downloadPng() {
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`;
   const t = theme();
   svg += `<rect width="${w}" height="${h}" fill="${t.bg}"/>`;
+  if (S.exportBorder) {
+    const bw = 3;
+    svg += `<rect x="${bw/2}" y="${bw/2}" width="${w-bw}" height="${h-bw}" fill="none" stroke="${t.stroke}" stroke-width="${bw}"/>`;
+  }
   svg += `<defs><marker id="ea" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="${t.stroke}"/></marker>`;
   svg += `<marker id="ea-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="${t.stroke}" stroke-width="1.5"/></marker>`;
   svg += `<marker id="ea-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="${t.stroke}"/></marker>`;
@@ -1438,7 +1532,7 @@ async function downloadPng() {
     svg += shapeToSvgStr(n, fill, stroke);
     const fontSize = n.fontSize || 12;
     const tc = n.textColor || (lightOrDark(fill)==="dark"?t.text:"#0c0b09");
-    svg += `<text x="${n.x+n.w/2}" y="${n.y+n.h/2+5}" text-anchor="middle" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    svg += `<text x="${n.x+n.w/2}" y="${labelY(n)}" text-anchor="middle" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
   });
 
   svg += "</g></svg>";
@@ -1476,6 +1570,27 @@ function shapeToSvgStr(node, fill, stroke) {
     case "lock": { const bw=w*.7,bh=h*.45,bx=x+(w-bw)/2,by=y+h*.5; return `<g ${fa} ${sa}><rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="5"/><path d="M${bx+bw*.18} ${by}V${y+h*.3}A${bw*.32} ${bw*.32} 0 0 1 ${bx+bw*.82} ${y+h*.3}V${by}" fill="none"/></g>`; }
     case "play": return `<polygon points="${x+w*.2},${y+h*.1} ${x+w*.85},${cy} ${x+w*.2},${y+h*.9}" ${fa} ${sa}/>`;
     case "api": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" ${fa} ${sa}/>`;
+    case "chevron": { const c=Math.min(w*.28,40); return `<polygon points="${x},${y} ${x+w-c},${y} ${x+w},${cy} ${x+w-c},${y+h} ${x},${y+h} ${x+c},${cy}" ${fa} ${sa}/>`; }
+    case "arrowUp": { const tw=w*.32, ax=x+w*.05, ay=y+h*.95, bx=x+w*.95, by=y+h*.05; return `<g ${sa} fill="none"><line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}"/><polyline points="${bx-tw},${by} ${bx},${by} ${bx},${by+tw}"/></g>`; }
+    case "list": {
+      const hh=Math.min(h*.22,32), rows=3, rh=(h-hh)/rows;
+      let s = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2" ${fa} ${sa}/><line x1="${x}" y1="${y+hh}" x2="${x+w}" y2="${y+hh}" ${sa}/>`;
+      for(let i=1;i<rows;i++) s+=`<line x1="${x}" y1="${y+hh+rh*i}" x2="${x+w}" y2="${y+hh+rh*i}" stroke="${stroke}" stroke-width="0.75" opacity="0.5"/>`;
+      for(let i=0;i<rows;i++) s+=`<text x="${x+14}" y="${y+hh+rh*i+rh/2+4}" font-size="11" font-family="JetBrains Mono,monospace" fill="${stroke}">Item ${i+1}</text>`;
+      return s;
+    }
+    case "speechRect": { const bH=h*.78, tw=w*.16, tx=x+w*.22; return `<path d="M${x} ${y}H${x+w}V${y+bH}H${tx+tw}L${tx} ${y+h}V${y+bH}H${x}Z" ${fa} ${sa}/>`; }
+    case "smiley": { const r=Math.min(w,h)/2; return `<g ${sa}><circle cx="${cx}" cy="${cy}" r="${r}" ${fa}/><ellipse cx="${cx-r*.35}" cy="${cy-r*.15}" rx="${r*.09}" ry="${r*.13}" fill="${stroke}" stroke="none"/><ellipse cx="${cx+r*.35}" cy="${cy-r*.15}" rx="${r*.09}" ry="${r*.13}" fill="${stroke}" stroke="none"/><path d="M${cx-r*.45} ${cy+r*.15}Q${cx} ${cy+r*.65} ${cx+r*.45} ${cy+r*.15}" fill="none"/></g>`; }
+    case "elbow": { const ax=x+w*.1, ay=y+h*.95, mx=x+w*.45, my=y+h*.95, bx=x+w*.95, by=y+h*.08; return `<g ${sa} fill="none"><path d="M${ax} ${ay}H${mx}L${bx} ${by}"/><circle cx="${bx}" cy="${by}" r="3"/></g>`; }
+    case "relationship": { const dw=w*.5; return `<g ${fa} ${sa}><line x1="${x}" y1="${cy}" x2="${x+w}" y2="${cy}"/><polygon points="${cx-dw/2},${cy} ${cx},${y} ${cx+dw/2},${cy} ${cx},${y+h}"/></g>`; }
+    case "envelope": return `<g ${fa} ${sa}><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2"/><path d="M${x} ${y}L${cx} ${y+h*.55}L${x+w} ${y}" fill="none"/></g>`;
+    case "check": return `<path d="M${x+w*.12} ${y+h*.55}L${x+w*.4} ${y+h*.85}L${x+w*.9} ${y+h*.12}" fill="none" ${sa}/>`;
+    case "doubleArrow": { const tw2=Math.min(h*.45,26), hx=Math.min(w*.18,34); return `<g ${fa} ${sa}><line x1="${x+hx}" y1="${cy}" x2="${x+w-hx}" y2="${cy}"/><polygon points="${x+hx},${y} ${x},${cy} ${x+hx},${y+h}"/><polygon points="${x+w-hx},${y} ${x+w},${cy} ${x+w-hx},${y+h}"/></g>`; }
+    case "banner": {
+      const bh=h*.8;
+      const d=`M${x} ${y}H${x+w}V${y+bh}C${x+w*.75} ${y+h} ${x+w*.6} ${y+bh-h*.12} ${x+w*.42} ${y+bh}C${x+w*.28} ${y+bh+h*.1} ${x+w*.12} ${y+h} ${x} ${y+bh}Z`;
+      return `<path d="${d}" ${fa} ${sa}/>`;
+    }
     default: return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ${fa} ${sa}/>`;
   }
 }
