@@ -872,6 +872,16 @@ function drawNode(node) {
   const isSel = S.sel && S.sel.k === "node" && S.sel.id === node.id;
   const g = svgEl("g"); g.style.cursor = "grab";
 
+  // invisible hit-area covering the full bounding box — guarantees click/drag works
+  // even for hollow/outline shapes (sync, check, arrows, elbow, etc.) where the
+  // visible geometry has no fill and clicks would otherwise only land on thin strokes.
+  const hit = svgEl("rect");
+  hit.setAttribute("x", node.x); hit.setAttribute("y", node.y);
+  hit.setAttribute("width", node.w); hit.setAttribute("height", node.h);
+  hit.setAttribute("fill", "transparent");
+  hit.setAttribute("stroke", "none");
+  g.appendChild(hit);
+
   // shape
   let shape;
   if (node.type === "image" && node.imageData) {
@@ -899,6 +909,7 @@ function drawNode(node) {
       shape.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
     }
   }
+  shape.style.pointerEvents = "none";
   g.appendChild(shape);
 
   // label (skip for image nodes or show below)
