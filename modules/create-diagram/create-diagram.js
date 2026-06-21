@@ -32,6 +32,13 @@ const SHAPES = [
   { type: "person",        label: "Actor",       w: 70,  h: 100, icon: `<circle cx="12" cy="7" r="3"/><path d="M7 21v-4a5 5 0 0 1 10 0v4"/>` },
   { type: "document",      label: "Document",    w: 120, h: 80,  icon: `<path d="M4 4h16v13c-2 0-2 2-4 2s-2-2-4-2-2 2-4 2-2-2-4-2z"/>` },
   { type: "text",          label: "Text",        w: 100, h: 32,  icon: `<line x1="6" y1="7" x2="18" y2="7"/><line x1="12" y1="7" x2="12" y2="18"/><line x1="9" y1="18" x2="15" y2="18"/>` },
+  { type: "sync",          label: "Sync",        w: 80,  h: 80,  icon: `<path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>` },
+  { type: "key",           label: "Key",         w: 100, h: 50,  icon: `<circle cx="8" cy="12" r="4"/><path d="M12 12h8"/><path d="M17 9v6"/><path d="M20 9v6"/>` },
+  { type: "server",        label: "Server",      w: 90,  h: 100, icon: `<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><circle cx="8" cy="7" r="1" fill="currentColor"/><circle cx="8" cy="17" r="1" fill="currentColor"/>` },
+  { type: "shield",        label: "Shield",      w: 80,  h: 100, icon: `<path d="M12 3l7 3v5c0 5-3.5 9.7-7 11-3.5-1.3-7-6-7-11V6z"/>` },
+  { type: "lock",          label: "Lock",        w: 70,  h: 90,  icon: `<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>` },
+  { type: "play",          label: "Play",        w: 80,  h: 80,  icon: `<polygon points="6,4 20,12 6,20"/>` },
+  { type: "api",           label: "API",         w: 90,  h: 60,  icon: `<rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 14V10l2 2 2-2v4M14 10h2.5a1.5 1.5 0 0 1 0 3H14" fill="none"/>` },
 ];
 
 const COLORS = [
@@ -47,9 +54,12 @@ const COLORS = [
 ];
 
 const LINE_STYLES = [
-  { key: "straight",    label: "Straight",    icon: `<line x1="4" y1="19" x2="20" y2="5"/>` },
-  { key: "curved",      label: "Curved",      icon: `<path d="M4 19C4 9 20 15 20 5"/>` },
-  { key: "orthogonal",  label: "Right-angle", icon: `<path d="M4 19V12H20V5"/>` },
+  { key: "straight",    label: "Straight",      icon: `<line x1="4" y1="19" x2="20" y2="5"/>`, dash: null },
+  { key: "curved",      label: "Curved",        icon: `<path d="M4 19C4 9 20 15 20 5"/>`, dash: null },
+  { key: "orthogonal",  label: "Right-angle",   icon: `<path d="M4 19V12H20V5"/>`, dash: null },
+  { key: "dashed",      label: "Dashed",        icon: `<line x1="4" y1="19" x2="20" y2="5" stroke-dasharray="3 2"/>`, dash: "6 3" },
+  { key: "dotted",      label: "Dotted",        icon: `<line x1="4" y1="19" x2="20" y2="5" stroke-dasharray="1.5 2"/>`, dash: "2 3" },
+  { key: "dash-curved", label: "Dashed curved", icon: `<path d="M4 19C4 9 20 15 20 5" stroke-dasharray="3 2"/>`, dash: "6 3", base: "curved" },
 ];
 
 const ARROW_TYPES = [
@@ -126,8 +136,8 @@ function buildShell(container) {
     <div id="dd-popup" class="hidden" style="position:absolute;top:100%;margin-top:4px;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:6px;z-index:20"></div>
   </div>
   <div style="display:flex;gap:8px;margin-top:8px;width:100%;min-width:0">
-    <div class="panel" id="dd-palette" style="padding:8px;width:112px;flex-shrink:0;height:440px;overflow-y:auto"></div>
-    <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;height:440px;flex:1;min-width:0;touch-action:none">
+    <div class="panel" id="dd-palette" style="padding:8px;width:140px;flex-shrink:0;height:560px;overflow-y:auto"></div>
+    <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;height:560px;flex:1;min-width:0;touch-action:none">
       <svg id="dd-svg" width="100%" height="100%" style="display:block;cursor:grab">
         <defs>
           <pattern id="grid" width="${GRID_SIZE}" height="${GRID_SIZE}" patternUnits="userSpaceOnUse">
@@ -262,7 +272,7 @@ function on(id, fn) { document.getElementById(id).addEventListener("click", fn);
 
 function buildPalette() {
   el.palette.innerHTML = `<span class="label" style="margin-bottom:8px">Shapes</span>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">${SHAPES.map(s =>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">${SHAPES.map(s =>
     `<button class="btn" data-shape="${s.type}" title="${s.label}" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;line-height:0">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">${s.icon}</svg>
       <span style="font-size:8px;line-height:1">${s.label}</span></button>`
@@ -1017,7 +1027,10 @@ function drawConn(conn) {
     p2 = conn.toPt || {x:0, y:0};
   }
 
-  const d  = buildPath(p1, p2, conn.style || "straight", wp);
+  const connStyle = conn.style || "straight";
+  const lsDef = LINE_STYLES.find(ls => ls.key === connStyle);
+  const pathStyle = lsDef && lsDef.base ? lsDef.base : connStyle;
+  const d  = buildPath(p1, p2, pathStyle, wp);
   const isSel = S.sel && S.sel.k === "conn" && S.sel.id === conn.id;
 
   const g = svgEl("g");
@@ -1035,6 +1048,7 @@ function drawConn(conn) {
   line.setAttribute("d", d); line.setAttribute("fill", "none");
   line.setAttribute("stroke", isSel ? theme().sel : theme().stroke);
   line.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
+  if (lsDef && lsDef.dash) line.setAttribute("stroke-dasharray", lsDef.dash);
   const endArrow = conn.endArrow || "filled";
   const startArrow = conn.startArrow || "none";
   const suffix = isSel ? "-w" : "";
@@ -1302,6 +1316,13 @@ function buildShape(node) {
     case "rounded":       return mkEl("rect",{x,y,width:w,height:h,rx:18});
     case "text":          return mkEl("rect",{x,y,width:w,height:h,rx:4,"stroke-dasharray":"3 2",stroke:"rgba(212,255,58,0.3)","stroke-width":"0.8"});
     case "image":         return mkEl("rect",{x,y,width:w,height:h,rx:4}); // fallback outline
+    case "sync":          { const g=svgEl("g"); g.appendChild(mkEl("path",{d:`M${x+w*.7} ${y+h*.15}l${w*.15} ${h*.15}-${w*.15} ${h*.15}`})); g.appendChild(mkEl("path",{d:`M${x} ${y+h*.5}h${w*.7}v-${h*.35}`,"fill":"none"})); g.appendChild(mkEl("path",{d:`M${x+w*.3} ${y+h*.85}l-${w*.15}-${h*.15} ${w*.15}-${h*.15}`})); g.appendChild(mkEl("path",{d:`M${x+w} ${y+h*.5}h-${w*.7}v${h*.35}`,"fill":"none"})); return g; }
+    case "key":           { const g=svgEl("g"); g.appendChild(mkEl("circle",{cx:x+w*.25,cy,r:Math.min(w,h)*.2})); g.appendChild(mkEl("line",{x1:x+w*.4,y1:cy,x2:x+w*.9,y2:cy})); g.appendChild(mkEl("line",{x1:x+w*.7,y1:cy-h*.2,x2:x+w*.7,y2:cy+h*.2})); g.appendChild(mkEl("line",{x1:x+w*.85,y1:cy-h*.2,x2:x+w*.85,y2:cy+h*.2})); return g; }
+    case "server":        { const g=svgEl("g"); const sh=h/3; for(let i=0;i<3;i++){g.appendChild(mkEl("rect",{x,y:y+i*sh+2,width:w,height:sh-4,rx:3}));g.appendChild(mkEl("circle",{cx:x+w*.15,cy:y+i*sh+sh/2,r:3}));} return g; }
+    case "shield":        return mkEl("path",{d:`M${cx} ${y}L${x+w} ${y+h*.25}V${y+h*.55}C${x+w} ${y+h*.8} ${cx} ${y+h} ${cx} ${y+h}C${cx} ${y+h} ${x} ${y+h*.8} ${x} ${y+h*.55}V${y+h*.25}Z`});
+    case "lock":          { const g=svgEl("g"); g.appendChild(mkEl("rect",{x:x+w*.1,y:y+h*.45,width:w*.8,height:h*.5,rx:4})); g.appendChild(mkEl("path",{d:`M${x+w*.25} ${y+h*.45}V${y+h*.25}A${w*.25} ${w*.25} 0 0 1 ${x+w*.75} ${y+h*.25}V${y+h*.45}`,"fill":"none"})); return g; }
+    case "play":          return mkEl("polygon",{points:`${x+w*.2},${y} ${x+w},${cy} ${x+w*.2},${y+h}`});
+    case "api":           return mkEl("rect",{x,y,width:w,height:h,rx:8});
     default:              return mkEl("rect",{x,y,width:w,height:h,rx:6});
   }
 }
@@ -1363,7 +1384,11 @@ async function downloadPng() {
     if (endA === "filled") markers += ` marker-end="url(#ea)"`;
     else if (endA !== "none") markers += ` marker-end="url(#ea-${endA})"`;
     if (startA !== "none") markers += ` marker-start="url(#es-${startA})"`;
-    svg += `<path d="${buildPath(p1,p2,c.style||"straight",wp)}" fill="none" stroke="${t.stroke}" stroke-width="1.5"${markers}/>`;
+    const cStyle = c.style || "straight";
+    const cLsDef = LINE_STYLES.find(ls => ls.key === cStyle);
+    const cPathStyle = cLsDef && cLsDef.base ? cLsDef.base : cStyle;
+    const dashAttr = cLsDef && cLsDef.dash ? ` stroke-dasharray="${cLsDef.dash}"` : "";
+    svg += `<path d="${buildPath(p1,p2,cPathStyle,wp)}" fill="none" stroke="${t.stroke}" stroke-width="1.5"${markers}${dashAttr}/>`;
   });
 
   S.nodes.forEach(n => {
@@ -1403,6 +1428,13 @@ function shapeToSvgStr(node, fill, stroke) {
     case "rounded": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="18" ${fa} ${sa}/>`;
     case "text": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="transparent"/>`;
     case "image": return node.imageData ? `<image href="${node.imageData}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>` : "";
+    case "sync": return `<g ${fa} ${sa} fill="none"><path d="M${x+w*.7} ${y+h*.15}l${w*.15} ${h*.15}-${w*.15} ${h*.15}"/><path d="M${x} ${y+h*.5}h${w*.7}v-${h*.35}"/><path d="M${x+w*.3} ${y+h*.85}l-${w*.15}-${h*.15} ${w*.15}-${h*.15}"/><path d="M${x+w} ${y+h*.5}h-${w*.7}v${h*.35}"/></g>`;
+    case "key": return `<g ${fa} ${sa}><circle cx="${x+w*.25}" cy="${cy}" r="${Math.min(w,h)*.2}"/><line x1="${x+w*.4}" y1="${cy}" x2="${x+w*.9}" y2="${cy}"/><line x1="${x+w*.7}" y1="${cy-h*.2}" x2="${x+w*.7}" y2="${cy+h*.2}"/><line x1="${x+w*.85}" y1="${cy-h*.2}" x2="${x+w*.85}" y2="${cy+h*.2}"/></g>`;
+    case "server": { let s=""; const sh=h/3; for(let i=0;i<3;i++) s+=`<rect x="${x}" y="${y+i*sh+2}" width="${w}" height="${sh-4}" rx="3" ${fa} ${sa}/>`; return s; }
+    case "shield": return `<path d="M${cx} ${y}L${x+w} ${y+h*.25}V${y+h*.55}C${x+w} ${y+h*.8} ${cx} ${y+h} ${cx} ${y+h}C${cx} ${y+h} ${x} ${y+h*.8} ${x} ${y+h*.55}V${y+h*.25}Z" ${fa} ${sa}/>`;
+    case "lock": return `<g ${fa} ${sa}><rect x="${x+w*.1}" y="${y+h*.45}" width="${w*.8}" height="${h*.5}" rx="4"/><path d="M${x+w*.25} ${y+h*.45}V${y+h*.25}A${w*.25} ${w*.25} 0 0 1 ${x+w*.75} ${y+h*.25}V${y+h*.45}" fill="none"/></g>`;
+    case "play": return `<polygon points="${x+w*.2},${y} ${x+w},${cy} ${x+w*.2},${y+h}" ${fa} ${sa}/>`;
+    case "api": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" ${fa} ${sa}/>`;
     default: return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ${fa} ${sa}/>`;
   }
 }
