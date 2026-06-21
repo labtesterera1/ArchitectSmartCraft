@@ -136,7 +136,7 @@ function buildShell(container) {
     <div id="dd-popup" class="hidden" style="position:absolute;top:100%;margin-top:4px;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:6px;z-index:20"></div>
   </div>
   <div style="display:flex;gap:8px;margin-top:8px;width:100%;min-width:0">
-    <div class="panel" id="dd-palette" style="padding:8px;width:140px;flex-shrink:0;height:560px;overflow-y:auto"></div>
+    <div class="panel" id="dd-palette" style="padding:8px;width:120px;flex-shrink:0;height:560px;overflow-y:auto"></div>
     <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;height:560px;flex:1;min-width:0;touch-action:none">
       <svg id="dd-svg" width="100%" height="100%" style="display:block;cursor:grab">
         <defs>
@@ -219,12 +219,15 @@ const TB = {
   rename:  `<path d="M11 4H4v16h16v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/>`,
   exprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 3v12"/><path d="M16 7l-4-4-4 4"/>`,
   imprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 15V3"/><path d="M8 11l4 4 4-4"/>`,
+  newDoc:  `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="9" y1="15" x2="15" y2="15"/>`,
 };
 
 function buildToolbar() {
   const hasSel = !!S.sel;
   const hasNode = hasSel && S.sel.k === "node";
   el.toolbar.innerHTML = [
+    tbBtn("tb-new",TB.newDoc, "New / Clear canvas"),
+    tbSep(),
     tbBtn("tb-zo", TB.zoomOut, "Zoom out"),
     tbBtn("tb-zi", TB.zoomIn,  "Zoom in"),
     tbBtn("tb-fit",TB.fit,     "Fit to view"),
@@ -247,6 +250,7 @@ function buildToolbar() {
     tbBtn("tb-dl", TB.dl,    "Download PNG"),
   ].join("");
 
+  on("tb-new", clearCanvas);
   on("tb-zo",  () => doZoom(1/1.15));
   on("tb-zi",  () => doZoom(1.15));
   on("tb-fit", fitView);
@@ -272,7 +276,7 @@ function on(id, fn) { document.getElementById(id).addEventListener("click", fn);
 
 function buildPalette() {
   el.palette.innerHTML = `<span class="label" style="margin-bottom:8px">Shapes</span>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px">${SHAPES.map(s =>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">${SHAPES.map(s =>
     `<button class="btn" data-shape="${s.type}" title="${s.label}" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;line-height:0">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">${s.icon}</svg>
       <span style="font-size:8px;line-height:1">${s.label}</span></button>`
@@ -447,6 +451,17 @@ function redo() {
   const next = S.redo.pop();
   S.nodes = next.nodes; S.conns = next.conns;
   setSel(null);
+}
+
+function clearCanvas() {
+  if (S.nodes.length === 0 && S.conns.length === 0) return;
+  if (!confirm("Clear the entire canvas? This can be undone with Ctrl+Z.")) return;
+  snap();
+  S.nodes = []; S.conns = [];
+  S.name = "Untitled"; S.id = null;
+  el.name.value = S.name;
+  setSel(null);
+  toast("Canvas cleared");
 }
 
 // ================================================================
@@ -1315,13 +1330,39 @@ function buildShape(node) {
     case "person":        { const hr=w*.28, hcy=y+hr+2; const g=svgEl("g"); g.appendChild(mkEl("circle",{cx,cy:hcy,r:hr})); g.appendChild(mkEl("path",{d:`M${x+w*.08} ${y+h}Q${x+w*.08} ${hcy+hr*1.6} ${cx} ${hcy+hr*1.6}Q${x+w*.92} ${hcy+hr*1.6} ${x+w*.92} ${y+h}`})); return g; }
     case "rounded":       return mkEl("rect",{x,y,width:w,height:h,rx:18});
     case "text":          return mkEl("rect",{x,y,width:w,height:h,rx:4,"stroke-dasharray":"3 2",stroke:"rgba(212,255,58,0.3)","stroke-width":"0.8"});
-    case "image":         return mkEl("rect",{x,y,width:w,height:h,rx:4}); // fallback outline
-    case "sync":          { const g=svgEl("g"); g.appendChild(mkEl("path",{d:`M${x+w*.7} ${y+h*.15}l${w*.15} ${h*.15}-${w*.15} ${h*.15}`})); g.appendChild(mkEl("path",{d:`M${x} ${y+h*.5}h${w*.7}v-${h*.35}`,"fill":"none"})); g.appendChild(mkEl("path",{d:`M${x+w*.3} ${y+h*.85}l-${w*.15}-${h*.15} ${w*.15}-${h*.15}`})); g.appendChild(mkEl("path",{d:`M${x+w} ${y+h*.5}h-${w*.7}v${h*.35}`,"fill":"none"})); return g; }
-    case "key":           { const g=svgEl("g"); g.appendChild(mkEl("circle",{cx:x+w*.25,cy,r:Math.min(w,h)*.2})); g.appendChild(mkEl("line",{x1:x+w*.4,y1:cy,x2:x+w*.9,y2:cy})); g.appendChild(mkEl("line",{x1:x+w*.7,y1:cy-h*.2,x2:x+w*.7,y2:cy+h*.2})); g.appendChild(mkEl("line",{x1:x+w*.85,y1:cy-h*.2,x2:x+w*.85,y2:cy+h*.2})); return g; }
-    case "server":        { const g=svgEl("g"); const sh=h/3; for(let i=0;i<3;i++){g.appendChild(mkEl("rect",{x,y:y+i*sh+2,width:w,height:sh-4,rx:3}));g.appendChild(mkEl("circle",{cx:x+w*.15,cy:y+i*sh+sh/2,r:3}));} return g; }
+    case "image":         return mkEl("rect",{x,y,width:w,height:h,rx:4});
+    case "sync": {
+      const r=Math.min(w,h)*.35, g=svgEl("g");
+      g.appendChild(mkEl("path",{d:`M${cx+r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy-r}`,fill:"none"}));
+      g.appendChild(mkEl("polygon",{points:`${cx-4},${cy-r-5} ${cx},${cy-r} ${cx-4},${cy-r+5}`}));
+      g.appendChild(mkEl("path",{d:`M${cx-r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy+r}`,fill:"none"}));
+      g.appendChild(mkEl("polygon",{points:`${cx+4},${cy+r-5} ${cx},${cy+r} ${cx+4},${cy+r+5}`}));
+      return g;
+    }
+    case "key": {
+      const r=Math.min(w,h)*.22, g=svgEl("g");
+      g.appendChild(mkEl("circle",{cx:x+r+w*.08,cy,r}));
+      g.appendChild(mkEl("line",{x1:x+r*2+w*.08,y1:cy,x2:x+w*.92,y2:cy}));
+      g.appendChild(mkEl("line",{x1:x+w*.72,y1:cy-h*.18,x2:x+w*.72,y2:cy+h*.18}));
+      g.appendChild(mkEl("line",{x1:x+w*.85,y1:cy-h*.18,x2:x+w*.85,y2:cy+h*.18}));
+      return g;
+    }
+    case "server": {
+      const g=svgEl("g"), sh=(h-8)/3;
+      for(let i=0;i<3;i++){
+        g.appendChild(mkEl("rect",{x:x+2,y:y+2+i*(sh+2),width:w-4,height:sh,rx:4}));
+        g.appendChild(mkEl("circle",{cx:x+14,cy:y+2+i*(sh+2)+sh/2,r:3}));
+      }
+      return g;
+    }
     case "shield":        return mkEl("path",{d:`M${cx} ${y}L${x+w} ${y+h*.25}V${y+h*.55}C${x+w} ${y+h*.8} ${cx} ${y+h} ${cx} ${y+h}C${cx} ${y+h} ${x} ${y+h*.8} ${x} ${y+h*.55}V${y+h*.25}Z`});
-    case "lock":          { const g=svgEl("g"); g.appendChild(mkEl("rect",{x:x+w*.1,y:y+h*.45,width:w*.8,height:h*.5,rx:4})); g.appendChild(mkEl("path",{d:`M${x+w*.25} ${y+h*.45}V${y+h*.25}A${w*.25} ${w*.25} 0 0 1 ${x+w*.75} ${y+h*.25}V${y+h*.45}`,"fill":"none"})); return g; }
-    case "play":          return mkEl("polygon",{points:`${x+w*.2},${y} ${x+w},${cy} ${x+w*.2},${y+h}`});
+    case "lock": {
+      const bw=w*.7, bh=h*.45, bx=x+(w-bw)/2, by=y+h*.5, g=svgEl("g");
+      g.appendChild(mkEl("rect",{x:bx,y:by,width:bw,height:bh,rx:5}));
+      g.appendChild(mkEl("path",{d:`M${bx+bw*.18} ${by}V${y+h*.3}A${bw*.32} ${bw*.32} 0 0 1 ${bx+bw*.82} ${y+h*.3}V${by}`,fill:"none"}));
+      return g;
+    }
+    case "play":          return mkEl("polygon",{points:`${x+w*.2},${y+h*.1} ${x+w*.85},${cy} ${x+w*.2},${y+h*.9}`});
     case "api":           return mkEl("rect",{x,y,width:w,height:h,rx:8});
     default:              return mkEl("rect",{x,y,width:w,height:h,rx:6});
   }
@@ -1428,12 +1469,12 @@ function shapeToSvgStr(node, fill, stroke) {
     case "rounded": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="18" ${fa} ${sa}/>`;
     case "text": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="transparent"/>`;
     case "image": return node.imageData ? `<image href="${node.imageData}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>` : "";
-    case "sync": return `<g ${fa} ${sa} fill="none"><path d="M${x+w*.7} ${y+h*.15}l${w*.15} ${h*.15}-${w*.15} ${h*.15}"/><path d="M${x} ${y+h*.5}h${w*.7}v-${h*.35}"/><path d="M${x+w*.3} ${y+h*.85}l-${w*.15}-${h*.15} ${w*.15}-${h*.15}"/><path d="M${x+w} ${y+h*.5}h-${w*.7}v${h*.35}"/></g>`;
-    case "key": return `<g ${fa} ${sa}><circle cx="${x+w*.25}" cy="${cy}" r="${Math.min(w,h)*.2}"/><line x1="${x+w*.4}" y1="${cy}" x2="${x+w*.9}" y2="${cy}"/><line x1="${x+w*.7}" y1="${cy-h*.2}" x2="${x+w*.7}" y2="${cy+h*.2}"/><line x1="${x+w*.85}" y1="${cy-h*.2}" x2="${x+w*.85}" y2="${cy+h*.2}"/></g>`;
-    case "server": { let s=""; const sh=h/3; for(let i=0;i<3;i++) s+=`<rect x="${x}" y="${y+i*sh+2}" width="${w}" height="${sh-4}" rx="3" ${fa} ${sa}/>`; return s; }
+    case "sync": { const r=Math.min(w,h)*.35; return `<g ${sa} fill="none"><path d="M${cx+r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy-r}"/><polygon points="${cx-4},${cy-r-5} ${cx},${cy-r} ${cx-4},${cy-r+5}" ${fa}/><path d="M${cx-r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy+r}"/><polygon points="${cx+4},${cy+r-5} ${cx},${cy+r} ${cx+4},${cy+r+5}" ${fa}/></g>`; }
+    case "key": { const r=Math.min(w,h)*.22; return `<g ${fa} ${sa}><circle cx="${x+r+w*.08}" cy="${cy}" r="${r}"/><line x1="${x+r*2+w*.08}" y1="${cy}" x2="${x+w*.92}" y2="${cy}"/><line x1="${x+w*.72}" y1="${cy-h*.18}" x2="${x+w*.72}" y2="${cy+h*.18}"/><line x1="${x+w*.85}" y1="${cy-h*.18}" x2="${x+w*.85}" y2="${cy+h*.18}"/></g>`; }
+    case "server": { let s=""; const sh=(h-8)/3; for(let i=0;i<3;i++) s+=`<rect x="${x+2}" y="${y+2+i*(sh+2)}" width="${w-4}" height="${sh}" rx="4" ${fa} ${sa}/>`; return s; }
     case "shield": return `<path d="M${cx} ${y}L${x+w} ${y+h*.25}V${y+h*.55}C${x+w} ${y+h*.8} ${cx} ${y+h} ${cx} ${y+h}C${cx} ${y+h} ${x} ${y+h*.8} ${x} ${y+h*.55}V${y+h*.25}Z" ${fa} ${sa}/>`;
-    case "lock": return `<g ${fa} ${sa}><rect x="${x+w*.1}" y="${y+h*.45}" width="${w*.8}" height="${h*.5}" rx="4"/><path d="M${x+w*.25} ${y+h*.45}V${y+h*.25}A${w*.25} ${w*.25} 0 0 1 ${x+w*.75} ${y+h*.25}V${y+h*.45}" fill="none"/></g>`;
-    case "play": return `<polygon points="${x+w*.2},${y} ${x+w},${cy} ${x+w*.2},${y+h}" ${fa} ${sa}/>`;
+    case "lock": { const bw=w*.7,bh=h*.45,bx=x+(w-bw)/2,by=y+h*.5; return `<g ${fa} ${sa}><rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="5"/><path d="M${bx+bw*.18} ${by}V${y+h*.3}A${bw*.32} ${bw*.32} 0 0 1 ${bx+bw*.82} ${y+h*.3}V${by}" fill="none"/></g>`; }
+    case "play": return `<polygon points="${x+w*.2},${y+h*.1} ${x+w*.85},${cy} ${x+w*.2},${y+h*.9}" ${fa} ${sa}/>`;
     case "api": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" ${fa} ${sa}/>`;
     default: return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ${fa} ${sa}/>`;
   }
