@@ -244,9 +244,53 @@ function bindCanvas() {
 function canvasDown(e) {
   if (e.target !== el.svg && e.target !== el.gridBg && e.target.id !== "dd-vp") return;
   if (S.tool === "text") { placeText(e); return; }
-  if (S.tool === "connect") return; // stay armed, user needs to click a box
+  if (S.tool === "connect") { startFreeConnect(e); return; }
   startPan(e);
   setSel(null);
+}
+
+/** Freeform connector drawing — click anywhere to start, drag to end. Snaps to boxes if near one. */
+function startFreeConnect(evt) {
+  const startPt = svgPt(evt);
+  const startNode = nodeAt(startPt);
+
+  const tmp = svgEl("line");
+  tmp.setAttribute("stroke","#d4ff3a"); tmp.setAttribute("stroke-width","1.5");
+  tmp.setAttribute("stroke-dasharray","4 3"); tmp.style.pointerEvents="none";
+  tmp.setAttribute("x1", startPt.x); tmp.setAttribute("y1", startPt.y);
+  tmp.setAttribute("x2", startPt.x); tmp.setAttribute("y2", startPt.y);
+  el.vp.appendChild(tmp);
+
+  const mv = e => {
+    e.preventDefault(); const p = svgPt(e);
+    tmp.setAttribute("x2", p.x); tmp.setAttribute("y2", p.y);
+  };
+  const up = e => {
+    const endPt = svgPt(e.changedTouches ? e.changedTouches[0] : e);
+    tmp.remove();
+    // Only create if dragged at least a small distance
+    if (Math.hypot(endPt.x - startPt.x, endPt.y - startPt.y) > 10) {
+      const endNode = nodeAt(endPt);
+      snap();
+      const nc = {
+        id: uid("c"), style: S.lineStyle, wp: [], startArrow: "none", endArrow: "filled",
+        from: startNode ? startNode.id : null,
+        to: endNode ? endNode.id : null,
+        fromPt: startNode ? null : { x: startPt.x, y: startPt.y },
+        toPt: endNode ? null : { x: endPt.x, y: endPt.y },
+      };
+      S.conns.push(nc);
+      setSel({ k: "conn", id: nc.id });
+    }
+    off(mv, up);
+    // Tool stays active for more connections
+  };
+  listen(mv, up);
+}
+
+/** Finds the node at a given point, or null if clicking empty canvas. */
+function nodeAt(pt) {
+  return S.nodes.find(n => pt.x >= n.x && pt.x <= n.x + n.w && pt.y >= n.y && pt.y <= n.y + n.h) || null;
 }
 
 function startPan(evt) {
@@ -284,7 +328,8 @@ function doZoom(factor) {
 }
 
 function fitView() {
-  if (!S.nodes.length) { S.zoom=1; S.pan={x:40,y:30}; applyVP(); return; }
+  const hasContent = S.nodes.length > 0 || S.conns.some(c => c.fromPt || c.toPt);
+  if (!hasContent) { S.zoom=1; S.pan={x:40,y:30}; applyVP(); return; }
   const b = contentBounds();
   const PAD = 40;
   const cw = b.maxX-b.minX+PAD*2, ch = b.maxY-b.minY+PAD*2;
@@ -586,15 +631,32 @@ function hideFloat() { el.float && el.float.classList.add("hidden"); }
 // ================================================================
 
 function drawConn(conn) {
-  const fn = S.nodes.find(n => n.id === conn.from);
-  const tn = S.nodes.find(n => n.id === conn.to);
-  if (!fn || !tn) return;
+  const fn = conn.from ? S.nodes.find(n => n.id === conn.from) : null;
+  const tn = conn.to ? S.nodes.find(n => n.id === conn.to) : null;
+  // Skip if referencing a deleted node (but not if it's a freeform point)
+  if (conn.from && !fn) return;
+  if (conn.to && !tn) return;
 
   const wp = conn.wp || [];
-  const aimTo   = wp.length ? wp[0] : center(tn);
-  const aimFrom = wp.length ? wp[wp.length-1] : center(fn);
-  const p1 = edgePt(fn, aimTo.x, aimTo.y);
-  const p2 = edgePt(tn, aimFrom.x, aimFrom.y);
+
+  // Resolve start point
+  let p1;
+  if (fn) {
+    const aimTo = wp.length ? wp[0] : (tn ? center(tn) : (conn.toPt || {x:0,y:0}));
+    p1 = edgePt(fn, aimTo.x, aimTo.y);
+  } else {
+    p1 = conn.fromPt || {x:0, y:0};
+  }
+
+  // Resolve end point
+  let p2;
+  if (tn) {
+    const aimFrom = wp.length ? wp[wp.length-1] : (fn ? center(fn) : (conn.fromPt || {x:0,y:0}));
+    p2 = edgePt(tn, aimFrom.x, aimFrom.y);
+  } else {
+    p2 = conn.toPt || {x:0, y:0};
+  }
+
   const d  = buildPath(p1, p2, conn.style || "straight", wp);
   const isSel = S.sel && S.sel.k === "conn" && S.sel.id === conn.id;
 
@@ -622,6 +684,10 @@ function drawConn(conn) {
   g.appendChild(line);
 
   // when selected: waypoint handles + add button + line-style toolbar
+  // Show endpoint dots for freeform (non-node-attached) start/end points
+  if (!fn) drawEndpointDot(g, p1, conn, "fromPt", isSel);
+  if (!tn) drawEndpointDot(g, p2, conn, "toPt", isSel);
+
   if (isSel) {
     const allPts = [p1, ...wp, p2];
     wp.forEach((w, i) => drawWpHandle(g, conn, w, i));
@@ -629,6 +695,49 @@ function drawConn(conn) {
     showConnFloat(p1, p2, conn);
   }
   el.vp.appendChild(g);
+}
+
+/** Renders a visible dot at a freeform connector endpoint. Draggable when the connector is selected. */
+function drawEndpointDot(g, pt, conn, ptKey, isSel) {
+  const dot = svgEl("circle");
+  dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y);
+  dot.setAttribute("r", isSel ? 7 : 5);
+  dot.setAttribute("fill", isSel ? "#5ab8ff" : "#d4ff3a");
+  dot.setAttribute("stroke", "#0c0b09"); dot.setAttribute("stroke-width", "1.5");
+  dot.style.cursor = isSel ? "grab" : "pointer";
+
+  if (isSel) {
+    let start = null, pre = null, moved = false;
+    const dn = e => {
+      e.stopPropagation(); start = svgPt(e); moved = false;
+      pre = { nodes: structuredClone(S.nodes), conns: structuredClone(S.conns) };
+      listen(mv, up);
+    };
+    const mv = e => {
+      e.preventDefault(); const p = svgPt(e);
+      if (Math.abs(p.x - start.x) > 2 || Math.abs(p.y - start.y) > 2) moved = true;
+      conn[ptKey] = { x: p.x, y: p.y };
+      // Snap to a box if dragged onto one
+      const snapNode = nodeAt(p);
+      if (snapNode) {
+        if (ptKey === "fromPt") { conn.from = snapNode.id; conn.fromPt = null; }
+        else { conn.to = snapNode.id; conn.toPt = null; }
+      } else {
+        if (ptKey === "fromPt") { conn.from = null; }
+        else { conn.to = null; }
+      }
+      draw();
+    };
+    const up = () => {
+      if (moved && pre) { S.undo.push(pre); if (S.undo.length > MAX_UNDO) S.undo.shift(); S.redo = []; buildToolbar(); }
+      start = null; pre = null; off(mv, up);
+    };
+    dot.addEventListener("mousedown", dn);
+    dot.addEventListener("touchstart", dn, { passive: true });
+  } else {
+    dot.addEventListener("click", e => { e.stopPropagation(); setSel({ k: "conn", id: conn.id }); });
+  }
+  g.appendChild(dot);
 }
 
 function showConnFloat(p1, p2, conn) {
@@ -862,7 +971,7 @@ function buildPath(p1, p2, style, wp) {
 // ================================================================
 
 async function downloadPng() {
-  if (!S.nodes.length) { toast("Add a shape first"); return; }
+  if (!S.nodes.length && !S.conns.length) { toast("Add something first"); return; }
   const PAD=40, b=contentBounds();
   const w=b.maxX-b.minX+PAD*2, h=b.maxY-b.minY+PAD*2;
   const ox=PAD-b.minX, oy=PAD-b.minY;
@@ -880,11 +989,14 @@ async function downloadPng() {
   svg += `<g transform="translate(${ox},${oy})">`;
 
   S.conns.forEach(c => {
-    const fn=S.nodes.find(n=>n.id===c.from), tn=S.nodes.find(n=>n.id===c.to);
-    if(!fn||!tn) return;
+    const fn=c.from?S.nodes.find(n=>n.id===c.from):null;
+    const tn=c.to?S.nodes.find(n=>n.id===c.to):null;
+    if(c.from&&!fn) return;
+    if(c.to&&!tn) return;
     const wp=c.wp||[];
-    const a2=wp.length?wp[0]:center(tn), af=wp.length?wp[wp.length-1]:center(fn);
-    const p1=edgePt(fn,a2.x,a2.y), p2=edgePt(tn,af.x,af.y);
+    let p1, p2;
+    if(fn){const aim=wp.length?wp[0]:(tn?center(tn):(c.toPt||{x:0,y:0}));p1=edgePt(fn,aim.x,aim.y);}else{p1=c.fromPt||{x:0,y:0};}
+    if(tn){const aim=wp.length?wp[wp.length-1]:(fn?center(fn):(c.fromPt||{x:0,y:0}));p2=edgePt(tn,aim.x,aim.y);}else{p2=c.toPt||{x:0,y:0};}
     let markers = "";
     const endA = c.endArrow || "filled";
     const startA = c.startArrow || "none";
@@ -942,7 +1054,7 @@ async function save() {
   const saved = await storage.diagrams.save({
     id: S.id, name: S.name,
     nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null})),
-    connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled"})),
+    connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled",fromPt:fromPt||null,toPt:toPt||null})),
   });
   S.id = saved.id;
   toast("Saved"); loadSavedList();
@@ -1001,7 +1113,11 @@ function edgePt(n, tx, ty) {
 
 function contentBounds() {
   const b = S.nodes.reduce((a,n)=>({minX:Math.min(a.minX,n.x),minY:Math.min(a.minY,n.y),maxX:Math.max(a.maxX,n.x+n.w),maxY:Math.max(a.maxY,n.y+n.h)}),{minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity});
-  S.conns.forEach(c=>(c.wp||[]).forEach(w=>{b.minX=Math.min(b.minX,w.x);b.minY=Math.min(b.minY,w.y);b.maxX=Math.max(b.maxX,w.x);b.maxY=Math.max(b.maxY,w.y);}));
+  S.conns.forEach(c=>{
+    (c.wp||[]).forEach(w=>{b.minX=Math.min(b.minX,w.x);b.minY=Math.min(b.minY,w.y);b.maxX=Math.max(b.maxX,w.x);b.maxY=Math.max(b.maxY,w.y);});
+    if(c.fromPt){b.minX=Math.min(b.minX,c.fromPt.x);b.minY=Math.min(b.minY,c.fromPt.y);b.maxX=Math.max(b.maxX,c.fromPt.x);b.maxY=Math.max(b.maxY,c.fromPt.y);}
+    if(c.toPt){b.minX=Math.min(b.minX,c.toPt.x);b.minY=Math.min(b.minY,c.toPt.y);b.maxX=Math.max(b.maxX,c.toPt.x);b.maxY=Math.max(b.maxY,c.toPt.y);}
+  });
   return b;
 }
 
