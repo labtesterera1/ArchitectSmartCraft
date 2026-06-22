@@ -65,6 +65,25 @@ const COLORS = [
   { key: "#ffffff", hex: "#ffffff", label: "White" },
 ];
 
+// Border (stroke) style options for shapes
+const BORDER_STYLES = [
+  { key: "solid",  label: "Solid",  dash: null,    icon: "▬" },
+  { key: "dashed", label: "Dashed", dash: "8 4",   icon: "╌" },
+  { key: "dotted", label: "Dotted", dash: "2 4",   icon: "·" },
+];
+
+// Stroke color options (separate from fill colors)
+const STROKE_COLORS = [
+  { key: "",        hex: null,      label: "Default" },
+  { key: "#ffffff", hex: "#ffffff", label: "White" },
+  { key: "#d4ff3a", hex: "#d4ff3a", label: "Lime" },
+  { key: "#ffd700", hex: "#ffd700", label: "Gold" },
+  { key: "#5ab8ff", hex: "#5ab8ff", label: "Blue" },
+  { key: "#4ee08a", hex: "#4ee08a", label: "Green" },
+  { key: "#ff5a4e", hex: "#ff5a4e", label: "Red" },
+  { key: "#c98fff", hex: "#c98fff", label: "Purple" },
+];
+
 const LINE_STYLES = [
   { key: "straight",    label: "Straight",      icon: `<line x1="4" y1="19" x2="20" y2="5"/>`, dash: null },
   { key: "curved",      label: "Curved",        icon: `<path d="M4 19C4 9 20 15 20 5"/>`, dash: null },
@@ -912,8 +931,17 @@ function drawNode(node) {
     const fill = (node.type === "text" || node.type === "group") ? "transparent" : (node.fill || t.fill);
     shape.setAttribute("fill", fill);
     if (node.type !== "text") {
-      shape.setAttribute("stroke", isSel ? t.sel : t.stroke);
-      shape.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
+      // stroke color: per-node override > selection highlight > theme default
+      const strokeClr = isSel ? t.sel : (node.strokeColor || t.stroke);
+      shape.setAttribute("stroke", strokeClr);
+      shape.setAttribute("stroke-width", isSel ? "2.5" : (node.type === "group" ? "2" : "1.5"));
+      // border style: dotted / dashed / solid
+      const bsDef = BORDER_STYLES.find(b => b.key === node.borderStyle);
+      if (bsDef && bsDef.dash) {
+        shape.setAttribute("stroke-dasharray", bsDef.dash);
+      } else if (node.type !== "group") {
+        shape.removeAttribute("stroke-dasharray");
+      }
     }
   }
   shape.style.pointerEvents = "none";
@@ -1126,22 +1154,77 @@ function showNodeFloat(node) {
   const x = (node.x + node.w/2) * S.zoom + S.pan.x;
   const y = node.y * S.zoom + S.pan.y;
   el.float.style.left = x+"px"; el.float.style.top = y+"px";
+  // Override the hardcoded flex layout so our column layout works
+  el.float.style.display = "block";
+  el.float.style.padding = "4px 6px";
   el.float.classList.remove("hidden");
-  el.float.innerHTML =
-    COLORS.slice(0,7).map(c => {
-      const active = (node.fill||"") === c.key;
-      return `<button data-nclr="${c.key}" style="width:18px;height:18px;border-radius:50%;background:${c.hex};border:2px solid ${active?"#fff":"rgba(255,255,255,.2)"};padding:0;cursor:pointer" title="${c.label}"></button>`;
-    }).join("") +
-    `<div style="width:1px;background:var(--color-border);margin:0 3px"></div>` +
-    `<button id="dd-convert-btn" title="Convert shape" style="background:none;border:none;cursor:pointer;padding:2px 5px;font-size:13px;color:var(--color-text);border-radius:4px;line-height:1">⇄</button>`;
+
+  const sep = `<div style="width:1px;background:var(--color-border);margin:0 2px;align-self:stretch"></div>`;
+
+  // Fill color dots
+  const fillRow = COLORS.slice(0,7).map(c => {
+    const active = (node.fill||"") === c.key;
+    return `<button data-nclr="${c.key}" title="Fill: ${c.label}"
+      style="width:16px;height:16px;border-radius:50%;background:${c.hex};
+      border:2px solid ${active?"#fff":"rgba(255,255,255,.2)"};padding:0;cursor:pointer;flex-shrink:0"></button>`;
+  }).join("");
+
+  // Border style buttons — solid / dashed / dotted
+  const borderRow = BORDER_STYLES.map(b => {
+    const active = (node.borderStyle||"solid") === b.key;
+    const dash = b.dash ? `stroke-dasharray="${b.dash}"` : "";
+    return `<button data-nborder="${b.key}" title="${b.label}"
+      style="width:30px;height:20px;padding:0;cursor:pointer;border-radius:4px;
+      border:1px solid ${active?"var(--color-primary)":"transparent"};
+      background:${active?"rgba(212,255,58,.15)":"transparent"};
+      display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">
+      <svg viewBox="0 0 28 8" width="26" height="8">
+        <line x1="2" y1="4" x2="26" y2="4"
+          stroke="${active?"var(--color-primary)":"var(--color-text)"}"
+          stroke-width="2" ${dash}/>
+      </svg></button>`;
+  }).join("");
+
+  // Stroke color dots
+  const strokeRow = STROKE_COLORS.map(c => {
+    const active = (node.strokeColor||"") === c.key;
+    const bg = c.hex || "transparent";
+    return `<button data-nstroke="${c.key}" title="Border color: ${c.label}"
+      style="width:16px;height:16px;border-radius:50%;background:${bg};
+      border:2px solid ${active?"#fff":"rgba(255,255,255,.25)"};
+      padding:0;cursor:pointer;flex-shrink:0;position:relative;overflow:hidden;
+      ${!c.hex?"box-shadow:inset 0 0 0 1px rgba(255,255,255,.3);":""}">
+      ${!c.hex?`<svg viewBox="0 0 12 12" width="12" height="12" style="position:absolute;top:0;left:0"><line x1="1" y1="11" x2="11" y2="1" stroke="#f55" stroke-width="1.5"/></svg>`:""}
+    </button>`;
+  }).join("");
+
+  el.float.innerHTML = `
+    <div style="display:flex;align-items:center;gap:3px;margin-bottom:5px">
+      <span style="font-size:9px;color:var(--color-text-tertiary);min-width:28px;flex-shrink:0">Fill</span>
+      ${sep}${fillRow}${sep}
+      <button id="dd-convert-btn" title="Convert shape"
+        style="background:none;border:none;cursor:pointer;padding:1px 4px;font-size:12px;
+        color:var(--color-text);border-radius:4px;line-height:1;flex-shrink:0">⇄</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:3px">
+      <span style="font-size:9px;color:var(--color-text-tertiary);min-width:28px;flex-shrink:0">Border</span>
+      ${sep}${borderRow}${sep}${strokeRow}
+    </div>`;
 
   el.float.querySelectorAll("[data-nclr]").forEach(b => b.addEventListener("click", e => {
-    e.stopPropagation(); snap(); node.fill = b.dataset.nclr||null; draw();
+    e.stopPropagation(); snap(); node.fill = b.dataset.nclr||null; draw(); showNodeFloat(node);
+  }));
+
+  el.float.querySelectorAll("[data-nborder]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); snap(); node.borderStyle = b.dataset.nborder; draw(); showNodeFloat(node);
+  }));
+
+  el.float.querySelectorAll("[data-nstroke]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); snap(); node.strokeColor = b.dataset.nstroke||null; draw(); showNodeFloat(node);
   }));
 
   document.getElementById("dd-convert-btn").addEventListener("click", e => {
-    e.stopPropagation();
-    openConvertPopup(node);
+    e.stopPropagation(); openConvertPopup(node);
   });
 }
 
@@ -1214,6 +1297,8 @@ function showTextFloat(node) {
   const x = (node.x + node.w/2) * S.zoom + S.pan.x;
   const y = node.y * S.zoom + S.pan.y;
   el.float.style.left = x+"px"; el.float.style.top = y+"px";
+  el.float.style.display = "flex";
+  el.float.style.padding = "4px";
   el.float.classList.remove("hidden");
   const sz = node.fontSize || 12;
   el.float.innerHTML = `
@@ -1769,7 +1854,13 @@ async function downloadPng() {
 function shapeToSvgStr(node, fill, stroke) {
   const {x,y,w,h,type} = node;
   const cx=x+w/2, cy=y+h/2;
-  const fa=`fill="${fill}"`, sa=stroke==="none"?"":`stroke="${stroke}" stroke-width="1.5"`;
+  // Per-node stroke color override
+  const effectiveStroke = node.strokeColor || stroke;
+  // Per-node border dash
+  const bsDef = BORDER_STYLES.find(b => b.key === node.borderStyle);
+  const dashAttr = (bsDef && bsDef.dash) ? ` stroke-dasharray="${bsDef.dash}"` : "";
+  const fa=`fill="${fill}"`;
+  const sa = effectiveStroke === "none" ? "" : `stroke="${effectiveStroke}" stroke-width="1.5"${dashAttr}`;
   switch(type) {
     case "ellipse": return `<ellipse cx="${cx}" cy="${cy}" rx="${w/2}" ry="${h/2}" ${fa} ${sa}/>`;
     case "diamond": return `<polygon points="${cx},${y} ${x+w},${cy} ${cx},${y+h} ${x},${cy}" ${fa} ${sa}/>`;
@@ -1782,7 +1873,7 @@ function shapeToSvgStr(node, fill, stroke) {
     case "document": { const wH=h*.15; return `<path d="M${x} ${y}H${x+w}V${y+h-wH}C${x+w*.75} ${y+h+wH} ${x+w*.25} ${y+h-wH*2} ${x} ${y+h}Z" ${fa} ${sa}/>`; }
     case "person": { const hr=w*.28,hcy=y+hr+2; return `<g ${fa} ${sa}><circle cx="${cx}" cy="${hcy}" r="${hr}"/><path d="M${x+w*.08} ${y+h}Q${x+w*.08} ${hcy+hr*1.6} ${cx} ${hcy+hr*1.6}Q${x+w*.92} ${hcy+hr*1.6} ${x+w*.92} ${y+h}"/></g>`; }
     case "rounded": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="18" ${fa} ${sa}/>`;
-    case "group":   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="transparent" stroke="${stroke}" stroke-width="2" stroke-dasharray="8 4"/>`;
+    case "group":   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="transparent" stroke="${effectiveStroke}" stroke-width="2" stroke-dasharray="${(bsDef && bsDef.dash) ? bsDef.dash : "8 4"}"/>`;
     case "text": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="transparent"/>`;
     case "image": return node.imageData ? `<image href="${node.imageData}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>` : "";
     case "sync": { const r=Math.min(w,h)*.35; return `<g ${sa} fill="none"><path d="M${cx+r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy-r}"/><polygon points="${cx-4},${cy-r-5} ${cx},${cy-r} ${cx-4},${cy-r+5}" ${fa}/><path d="M${cx-r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy+r}"/><polygon points="${cx+4},${cy+r-5} ${cx},${cy+r} ${cx+4},${cy+r+5}" ${fa}/></g>`; }
