@@ -29,6 +29,7 @@ const STYLES = [
   { key: "steps",       label: "Step-by-step",       icon: "①" },
   { key: "example",     label: "Real-world example",  icon: "◉" },
   { key: "suggestions", label: "Suggestions",         icon: "◆" },
+  { key: "live",        label: "Live Diagram",        icon: "⬡" },
 ];
 
 /* ── System prompt (shared across all styles) ──────────────────── */
@@ -109,6 +110,13 @@ let isLoading          = false;
 
 export function initAnalyzeDiagramView(container) {
   containerEl        = container;
+  // Make container scrollable and fill viewport height
+  container.style.display        = "flex";
+  container.style.flexDirection  = "column";
+  container.style.flex           = "1";
+  container.style.minHeight      = "0";
+  container.style.overflowY      = "auto";
+  container.style.padding        = "12px 16px 24px";
   pendingImageBase64 = null;
   pendingImageName   = null;
   activeStyle        = "steps";
@@ -125,48 +133,78 @@ export function initAnalyzeDiagramView(container) {
 function render() {
   containerEl.innerHTML = `
     <style>${MODULE_CSS}</style>
-    <h2>Analyze a diagram</h2>
-    <p style="font-size:13px;">Upload an architecture or flow diagram image — choose how you'd like it explained.</p>
 
-    <div class="panel corner-frame">
-      <span class="label">Upload image</span>
-      <label class="adm-upload-zone" id="upload-zone">
-        <input type="file" id="upload-input" accept="image/*" style="display:none;" />
-        <div class="adm-upload-content">
-          <span style="font-size:28px; opacity:0.5;">⬆</span>
-          <span style="font-size:13px; color:var(--color-text-secondary);">Click or drag an image here</span>
+    <!-- Tab bar: Upload-based tabs + Live Diagram -->
+    <div class="adm-tab-bar" id="adm-tab-bar">
+      <button class="adm-tab${activeStyle!=="live"?" adm-tab-active":""}" data-tab="upload">⬆ Upload & Analyze</button>
+      <button class="adm-tab${activeStyle==="live"?" adm-tab-active":""}" data-tab="live">⬡ Live Diagram</button>
+    </div>
+
+    <!-- Upload panel -->
+    <div id="adm-upload-panel" style="display:${activeStyle!=="live"?"block":"none"}">
+      <div class="panel corner-frame" style="margin-top:8px">
+        <span class="label">Upload image</span>
+        <label class="adm-upload-zone" id="upload-zone">
+          <input type="file" id="upload-input" accept="image/*" style="display:none;" />
+          <div class="adm-upload-content">
+            <span style="font-size:28px; opacity:0.5;">⬆</span>
+            <span style="font-size:13px; color:var(--color-text-secondary);">Click or drag an image here</span>
+          </div>
+        </label>
+        <div id="image-preview-wrap" class="mt-2 hidden">
+          <img id="image-preview" style="max-width:100%; border-radius:var(--radius-md); border:1px solid var(--color-border);" />
+          <button class="btn mt-1" id="change-image-btn" style="font-size:12px;">Change image</button>
         </div>
-      </label>
-      <div id="image-preview-wrap" class="mt-2 hidden">
-        <img id="image-preview" style="max-width:100%; border-radius:var(--radius-md); border:1px solid var(--color-border);" />
-        <button class="btn mt-1" id="change-image-btn" style="font-size:12px;">Change image</button>
+        <p id="analyze-status" class="adm-status"></p>
       </div>
-      <p id="analyze-status" class="adm-status"></p>
+
+      <div class="panel mt-2" id="explanation-panel" style="display:none;">
+        <div class="adm-toolbar">
+          <div class="flex gap-1" id="style-toggle" style="flex-wrap:wrap;"></div>
+          <div class="flex gap-1" id="action-buttons"></div>
+        </div>
+        <div id="provider-badge" class="adm-provider-badge hidden"></div>
+        <div id="loading-skeleton" class="adm-skeleton hidden">
+          <div class="adm-skeleton-line w80"></div>
+          <div class="adm-skeleton-line w100"></div>
+          <div class="adm-skeleton-line w60"></div>
+          <div class="adm-skeleton-line w90"></div>
+          <div class="adm-skeleton-line w70"></div>
+          <div class="adm-skeleton-line w100"></div>
+          <div class="adm-skeleton-line w45"></div>
+        </div>
+        <div id="explanation-text" class="adm-explanation"></div>
+      </div>
+
+      <div class="panel mt-2">
+        <span class="label">Previous analyses</span>
+        <div id="analyses-list"></div>
+      </div>
     </div>
 
-    <div class="panel mt-2" id="explanation-panel" style="display:none;">
-      <div class="adm-toolbar">
-        <div class="flex gap-1" id="style-toggle" style="flex-wrap:wrap;"></div>
-        <div class="flex gap-1" id="action-buttons"></div>
-      </div>
-      <div id="provider-badge" class="adm-provider-badge hidden"></div>
-      <div id="loading-skeleton" class="adm-skeleton hidden">
-        <div class="adm-skeleton-line w80"></div>
-        <div class="adm-skeleton-line w100"></div>
-        <div class="adm-skeleton-line w60"></div>
-        <div class="adm-skeleton-line w90"></div>
-        <div class="adm-skeleton-line w70"></div>
-        <div class="adm-skeleton-line w100"></div>
-        <div class="adm-skeleton-line w45"></div>
-      </div>
-      <div id="explanation-text" class="adm-explanation"></div>
-    </div>
-
-    <div class="panel mt-2">
-      <span class="label">Previous analyses</span>
-      <div id="analyses-list"></div>
+    <!-- Live Diagram panel -->
+    <div id="adm-live-panel" style="display:${activeStyle==="live"?"block":"none"};margin-top:8px">
+      <div id="adm-live-content"></div>
     </div>
   `;
+
+  /* Tab switching */
+  document.querySelectorAll(".adm-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".adm-tab").forEach(b => b.classList.remove("adm-tab-active"));
+      btn.classList.add("adm-tab-active");
+      if (btn.dataset.tab === "live") {
+        activeStyle = "live";
+        document.getElementById("adm-upload-panel").style.display = "none";
+        document.getElementById("adm-live-panel").style.display = "block";
+        renderLiveDiagram();
+      } else {
+        activeStyle = "steps";
+        document.getElementById("adm-upload-panel").style.display = "block";
+        document.getElementById("adm-live-panel").style.display = "none";
+      }
+    });
+  });
 
   /* Upload input */
   document.getElementById("upload-input").addEventListener("change", handleFileSelect);
@@ -193,6 +231,8 @@ function render() {
 
   renderStyleToggle();
   renderAnalysesList();
+
+  if (activeStyle === "live") renderLiveDiagram();
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -200,6 +240,20 @@ function render() {
    ════════════════════════════════════════════════════════════════ */
 
 const MODULE_CSS = `
+  /* Tab bar */
+  .adm-tab-bar {
+    display:flex; gap:4px; border-bottom:1px solid var(--color-border);
+    margin-bottom:0; padding-bottom:0;
+  }
+  .adm-tab {
+    padding:8px 18px; background:transparent; border:none; border-bottom:2px solid transparent;
+    color:var(--color-text-tertiary); font-family:var(--font-mono); font-size:12px;
+    letter-spacing:.06em; text-transform:uppercase; cursor:pointer;
+    transition:color .15s, border-color .15s; margin-bottom:-1px;
+  }
+  .adm-tab:hover { color:var(--color-text); }
+  .adm-tab.adm-tab-active { color:var(--color-accent); border-bottom-color:var(--color-accent); }
+
   /* Upload zone */
   .adm-upload-zone {
     display:flex; align-items:center; justify-content:center;
@@ -293,6 +347,228 @@ const MODULE_CSS = `
 `;
 
 /* ════════════════════════════════════════════════════════════════
+   LIVE DIAGRAM — reads current diagram from storage and renders
+   ════════════════════════════════════════════════════════════════ */
+
+async function renderLiveDiagram() {
+  const wrap = document.getElementById("adm-live-content");
+  if (!wrap) return;
+
+  wrap.innerHTML = `<div class="adm-skeleton" style="margin-top:8px">
+    <div class="adm-skeleton-line w60"></div><div class="adm-skeleton-line w80"></div>
+    <div class="adm-skeleton-line w40"></div>
+  </div>`;
+
+  // Load saved diagrams list
+  const list = await storage.diagrams.list().catch(() => []);
+  if (!list || !list.length) {
+    wrap.innerHTML = `<div class="panel" style="margin-top:8px;text-align:center;padding:32px 16px">
+      <div style="font-size:32px;opacity:.3;margin-bottom:8px">⬡</div>
+      <p style="font-size:13px;color:var(--color-text-tertiary)">No saved diagrams yet.<br>Go to <strong>Create</strong>, build a diagram, then Save it.</p>
+    </div>`;
+    return;
+  }
+
+  // Pick most recently updated diagram
+  const sorted = list.sort((a,b) => new Date(b.updatedAt||b.createdAt) - new Date(a.updatedAt||a.createdAt));
+  let diagram = sorted[0];
+
+  wrap.innerHTML = `
+    <div class="panel" style="margin-top:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <span class="label">Live diagram</span>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="adm-diag-select" style="background:var(--color-bg-raised);border:1px solid var(--color-border);
+            border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-mono);
+            font-size:12px;padding:4px 8px;cursor:pointer">
+            ${sorted.map((d,i) => `<option value="${i}">${escapeHtml(d.name||"Untitled")}</option>`).join("")}
+          </select>
+          <button class="btn btn-primary" id="adm-live-explain-btn" style="font-size:12px;padding:5px 14px">⬡ Explain this</button>
+        </div>
+      </div>
+      <div id="adm-live-svg-wrap" style="border:1px solid var(--color-border);border-radius:var(--radius-md);overflow:auto;background:var(--color-bg)"></div>
+    </div>
+    <div class="panel mt-2" id="adm-live-explanation-panel" style="display:none">
+      <div id="adm-live-badge" class="adm-provider-badge hidden"></div>
+      <div id="adm-live-skeleton" class="adm-skeleton hidden">
+        <div class="adm-skeleton-line w80"></div><div class="adm-skeleton-line w100"></div>
+        <div class="adm-skeleton-line w60"></div><div class="adm-skeleton-line w90"></div>
+      </div>
+      <div id="adm-live-text" class="adm-explanation"></div>
+    </div>
+  `;
+
+  renderDiagramSvg(diagram);
+
+  // Diagram selector
+  document.getElementById("adm-diag-select").addEventListener("change", e => {
+    diagram = sorted[parseInt(e.target.value)];
+    renderDiagramSvg(diagram);
+    document.getElementById("adm-live-explanation-panel").style.display = "none";
+  });
+
+  // Explain button
+  document.getElementById("adm-live-explain-btn").addEventListener("click", async () => {
+    await explainLiveDiagram(diagram);
+  });
+}
+
+function renderDiagramSvg(diagram) {
+  const wrap = document.getElementById("adm-live-svg-wrap");
+  if (!wrap || !diagram) return;
+
+  const nodes = diagram.nodes || [];
+  const conns = diagram.conns || [];
+
+  if (!nodes.length) {
+    wrap.innerHTML = `<p style="text-align:center;padding:24px;font-size:13px;color:var(--color-text-tertiary)">This diagram has no shapes yet.</p>`;
+    return;
+  }
+
+  // Compute bounding box
+  const pad = 24;
+  const minX = Math.min(...nodes.map(n=>n.x)) - pad;
+  const minY = Math.min(...nodes.map(n=>n.y)) - pad;
+  const maxX = Math.max(...nodes.map(n=>n.x+n.w)) + pad;
+  const maxY = Math.max(...nodes.map(n=>n.y+n.h)) + pad;
+  const vw = maxX - minX, vh = maxY - minY;
+
+  const theme = diagram.theme || "dark";
+  const THEMES = {
+    dark:  { bg:"#0e1e2e", fill:"#0a1520", stroke:"#5ab8ff", text:"#e8f4ff" },
+    light: { bg:"#f0f4f8", fill:"#ffffff", stroke:"#2563eb", text:"#1e293b" },
+    mono:  { bg:"#111",    fill:"#1a1a1a", stroke:"#ffffff", text:"#ffffff" },
+  };
+  const t = THEMES[theme] || THEMES.dark;
+
+  // Build connector paths
+  let connSvg = "";
+  conns.forEach(c => {
+    const from = nodes.find(n=>n.id===c.from), to = nodes.find(n=>n.id===c.to);
+    if (!from||!to) return;
+    const x1=from.x+from.w/2-minX, y1=from.y+from.h/2-minY;
+    const x2=to.x+to.w/2-minX,   y2=to.y+to.h/2-minY;
+    connSvg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+      stroke="${t.stroke}" stroke-width="1.5" opacity="0.6"
+      marker-end="url(#live-ah)"/>`;
+  });
+
+  // Build node shapes
+  let nodeSvg = "";
+  nodes.forEach(n => {
+    const x=n.x-minX, y=n.y-minY, w=n.w, h=n.h;
+    const fill = n.fill || t.fill;
+    const stroke = n.strokeColor || t.stroke;
+    const dash = n.borderStyle==="dashed"?" stroke-dasharray='8 4'"
+               : n.borderStyle==="dotted"?" stroke-dasharray='2 4'" : "";
+    // Simple rounded rect for all types in preview
+    const rx = (n.type==="rounded"||n.type==="ellipse"||n.type==="group") ? Math.min(w,h)*0.2 : 4;
+    nodeSvg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"
+      fill="${fill}" stroke="${stroke}" stroke-width="1.5"${dash}/>`;
+    if (n.label) {
+      nodeSvg += `<text x="${x+w/2}" y="${y+h/2+4}" text-anchor="middle"
+        font-size="${Math.min(n.fontSize||12,13)}" font-family="monospace"
+        fill="${t.text}" style="pointer-events:none">${escapeHtml(n.label)}</text>`;
+    }
+  });
+
+  wrap.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 ${vw} ${vh}" width="100%"
+    style="max-height:420px;display:block;background:${t.bg}">
+    <defs>
+      <marker id="live-ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+        <polygon points="0 0,8 4,0 8" fill="${t.stroke}" opacity="0.7"/>
+      </marker>
+    </defs>
+    ${connSvg}${nodeSvg}
+  </svg>`;
+}
+
+async function explainLiveDiagram(diagram) {
+  const panel = document.getElementById("adm-live-explanation-panel");
+  const skeletonEl = document.getElementById("adm-live-skeleton");
+  const textEl = document.getElementById("adm-live-text");
+  const badgeEl = document.getElementById("adm-live-badge");
+
+  panel.style.display = "block";
+  skeletonEl.classList.remove("hidden");
+  textEl.innerHTML = "";
+  badgeEl.classList.add("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const { provider, apiKey } = await loadApiConfig();
+  if (!provider || !apiKey) {
+    skeletonEl.classList.add("hidden");
+    textEl.innerHTML = `<p style="color:var(--color-text-tertiary);font-size:13px">
+      No API key configured — go to <strong>Settings</strong> to add one.</p>`;
+    return;
+  }
+
+  // Build a text description of the diagram for the AI
+  const nodes = diagram.nodes || [];
+  const conns = diagram.conns || [];
+  const nodeDesc = nodes.map(n => `- ${n.type} node "${n.label||"(unlabelled)"}" at (${n.x},${n.y}) size ${n.w}x${n.h}`).join("\n");
+  const connDesc = conns.map(c => {
+    const f = nodes.find(n=>n.id===c.from), t2 = nodes.find(n=>n.id===c.to);
+    return `- "${f?.label||c.from}" → "${t2?.label||c.to}"${c.label?" ("+c.label+")":""}`;
+  }).join("\n");
+
+  const prompt = `You are analyzing an architecture diagram described in structured text below.
+
+Diagram name: "${diagram.name || "Untitled"}"
+
+Nodes (shapes):
+${nodeDesc || "(none)"}
+
+Connections:
+${connDesc || "(none)"}
+
+Provide a clear, concise explanation of this diagram:
+
+## Overview
+One sentence describing what this system/flow does.
+
+## Components
+Brief role of each key component (use the exact names above in **bold**).
+
+## Flow
+Step-by-step numbered walkthrough of how data/requests move through the system.
+
+## Key Points
+2-3 notable design decisions or things to be aware of.
+
+Start immediately with "## Overview" — no preamble.`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!res.ok) throw new Error(`API error ${res.status}`);
+    const data = await res.json();
+    const text = data.content?.map(b=>b.text||"").join("") || "";
+
+    skeletonEl.classList.add("hidden");
+    badgeEl.classList.remove("hidden");
+    badgeEl.textContent = "Generated by Claude";
+    textEl.innerHTML = renderMarkdown(stripFiller(text));
+  } catch (err) {
+    skeletonEl.classList.add("hidden");
+    textEl.innerHTML = `<p style="color:var(--color-danger,#ff5a4e);font-size:13px">
+      Error: ${escapeHtml(err.message)}</p>
+      <button class="adm-retry-btn" id="adm-live-retry">↻ Retry</button>`;
+    document.getElementById("adm-live-retry")?.addEventListener("click", () => explainLiveDiagram(diagram));
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
    STYLE TOGGLE + ACTION BUTTONS
    ════════════════════════════════════════════════════════════════ */
 
@@ -300,7 +576,10 @@ function renderStyleToggle() {
   const toggleEl = document.getElementById("style-toggle");
   if (!toggleEl) return;
 
-  toggleEl.innerHTML = STYLES.map(
+  // Only show upload-based styles (not live tab)
+  const uploadStyles = STYLES.filter(s => s.key !== "live");
+
+  toggleEl.innerHTML = uploadStyles.map(
     (s) =>
       `<button class="btn${s.key === activeStyle ? " btn-primary" : ""}" ` +
       `data-style="${s.key}" ${isLoading ? "disabled" : ""}>` +
