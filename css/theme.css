@@ -90,92 +90,64 @@ button {
   flex-direction: column;
 }
 
-.app-header {
-  height: var(--header-height);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--color-border);
-  position: sticky;
-  top: 0;
-  background: var(--color-bg);
-  z-index: 10;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.brand img {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-}
-
-.brand-name {
-  font-family: var(--font-serif);
-  font-size: 19px;
-  color: var(--color-text);
-  letter-spacing: 0.01em;
-}
-
-.brand-tag {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.15em;
-  color: var(--color-accent);
-  opacity: 0.8;
-  text-transform: uppercase;
-}
-
 .app-main {
   flex: 1;
   width: 100%;
   max-width: var(--max-width);
   margin: 0 auto;
-  padding: 24px 20px calc(var(--nav-height) + 32px);
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#view-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* ---------------------------------------------------------- */
-/* Bottom nav (mobile-first, also fine on laptop) */
+/* Top nav (CREATE / ANALYZE / SETTINGS)                      */
 /* ---------------------------------------------------------- */
 
 .app-nav {
-  position: fixed;
-  bottom: 0;
+  position: sticky;
+  top: 0;
   left: 0;
   right: 0;
   height: var(--nav-height);
   display: flex;
-  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
   background: var(--color-bg);
   z-index: 10;
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  justify-content: center;
+  gap: 4px;
+  padding-bottom: 0;
 }
 
 .nav-item {
-  flex: 1;
+  flex: none;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
   background: transparent;
   border: none;
   color: var(--color-text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 8px 0;
+  padding: 0 20px;
   transition: color 0.15s ease;
+  cursor: pointer;
 }
 
 .nav-item svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.6;
@@ -183,6 +155,7 @@ button {
 
 .nav-item.active {
   color: var(--color-accent);
+  border-bottom: 2px solid var(--color-accent);
 }
 
 .nav-item:active {
@@ -361,7 +334,7 @@ textarea:focus {
 
 .toast {
   position: fixed;
-  bottom: calc(var(--nav-height) + 16px);
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--color-bg-raised);
@@ -394,19 +367,7 @@ textarea:focus {
 .gap-2 { gap: 16px; }
 
 @media (min-width: 700px) {
-  .app-nav {
-    position: sticky;
-    bottom: auto;
-    top: var(--header-height);
-    border-top: none;
-    border-bottom: 1px solid var(--color-border);
-    justify-content: center;
-    gap: 4px;
-  }
-
-  .nav-item {
-    flex: none;
-    flex-direction: row;
-    padding: 14px 20px;
+  .app-main {
+    padding: 8px 16px 16px;
   }
 }
