@@ -2034,6 +2034,78 @@ function svg2png(svgStr, w, h) {
   });
 }
 
+/** Exported: renders any diagram object to a PNG data URL using the full shape engine */
+export async function renderDiagramToPng(diagram) {
+  const nodes = diagram.nodes || [];
+  const conns  = diagram.conns  || [];
+  if (!nodes.length && !conns.length) return null;
+
+  const themeKey = diagram.theme || "dark";
+  const t = THEMES.find(th => th.key === themeKey) || THEMES[0];
+
+  // Compute bounding box
+  const PAD = 40;
+  const xs = nodes.flatMap(n=>[n.x,n.x+n.w]);
+  const ys = nodes.flatMap(n=>[n.y,n.y+n.h]);
+  const minX=Math.min(...xs), minY=Math.min(...ys);
+  const maxX=Math.max(...xs), maxY=Math.max(...ys);
+  const w=maxX-minX+PAD*2, h=maxY-minY+PAD*2;
+  const ox=PAD-minX, oy=PAD-minY;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">`;
+  svg += `<rect width="${w}" height="${h}" fill="${t.bg}"/>`;
+  svg += `<defs>
+    <marker id="ea" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><polygon points="0 0,9 4.5,0 9" fill="${t.stroke}"/></marker>
+    <marker id="ea-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9" fill="none" stroke="${t.stroke}" stroke-width="1.5"/></marker>
+    <marker id="ea-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><polygon points="0,5 5,0 10,5 5,10" fill="${t.stroke}"/></marker>
+    <marker id="ea-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="${t.stroke}"/></marker>
+    <marker id="es-arrow" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><path d="M9 0L0 4.5L9 9" fill="none" stroke="${t.stroke}" stroke-width="1.5"/></marker>
+    <marker id="es-filled" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto-start-reverse"><polygon points="9 0,0 4.5,9 9" fill="${t.stroke}"/></marker>
+    <marker id="es-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><polygon points="0,5 5,0 10,5 5,10" fill="${t.stroke}"/></marker>
+    <marker id="es-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><circle cx="4" cy="4" r="3" fill="${t.stroke}"/></marker>
+  </defs>`;
+  svg += `<g transform="translate(${ox},${oy})">`;
+
+  conns.forEach(c => {
+    const fn = c.from ? nodes.find(n=>n.id===c.from) : null;
+    const tn = c.to   ? nodes.find(n=>n.id===c.to)   : null;
+    if (c.from&&!fn) return; if (c.to&&!tn) return;
+    const wp = c.wp||[];
+    let p1, p2;
+    if (fn) { const aim=wp.length?wp[0]:(tn?center(tn):(c.toPt||{x:0,y:0}));   p1=edgePt(fn,aim.x,aim.y); } else { p1=c.fromPt||{x:0,y:0}; }
+    if (tn) { const aim=wp.length?wp[wp.length-1]:(fn?center(fn):(c.fromPt||{x:0,y:0})); p2=edgePt(tn,aim.x,aim.y); } else { p2=c.toPt||{x:0,y:0}; }
+    let markers="";
+    const endA=c.endArrow||"filled", startA=c.startArrow||"none";
+    if (endA==="filled") markers+=` marker-end="url(#ea)"`;
+    else if (endA!=="none") markers+=` marker-end="url(#ea-${endA})"`;
+    if (startA!=="none") markers+=` marker-start="url(#es-${startA})"`;
+    const cStyle=c.style||"straight";
+    const cLsDef=LINE_STYLES.find(ls=>ls.key===cStyle);
+    const cPathStyle=cLsDef&&cLsDef.base?cLsDef.base:cStyle;
+    const dashAttr=cLsDef&&cLsDef.dash?` stroke-dasharray="${cLsDef.dash}"`:"";
+    svg += `<path d="${buildPath(p1,p2,cPathStyle,wp)}" fill="none" stroke="${t.stroke}" stroke-width="1.5"${markers}${dashAttr}/>`;
+    if (c.label) {
+      const mx=(p1.x+p2.x)/2, my=(p1.y+p2.y)/2;
+      svg += `<text x="${mx}" y="${my-6}" text-anchor="middle" fill="${t.text}" font-size="11" font-family="JetBrains Mono,monospace">${escXml(c.label)}</text>`;
+    }
+  });
+
+  nodes.forEach(n => {
+    const fill=(n.type==="text"||n.type==="group")?"transparent":(n.fill||t.fill);
+    const stroke=(n.type==="text")?"none":(n.strokeColor||t.stroke);
+    const rot=n.rotate?`rotate(${n.rotate},${n.x+n.w/2},${n.y+n.h/2})`:null;
+    if (rot) svg+=`<g transform="${rot}">`;
+    svg+=shapeToSvgStr(n,fill,stroke);
+    const fontSize=n.fontSize||12;
+    const tc=n.textColor||(lightOrDark(fill)==="dark"?t.text:"#0c0b09");
+    svg+=`<text x="${labelX(n)}" y="${labelY(n)}" text-anchor="${labelAnchor(n)}" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    if (rot) svg+=`</g>`;
+  });
+
+  svg+="</g></svg>";
+  return svg2png(svg, w, h);
+}
+
 function toast(msg) {
   let t = document.getElementById("dd-toast");
   if(!t){t=document.createElement("div");t.id="dd-toast";t.className="toast";document.body.appendChild(t);}
