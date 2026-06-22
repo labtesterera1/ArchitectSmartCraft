@@ -160,18 +160,27 @@ export async function initCreateDiagramView(container) {
 // ================================================================
 
 function buildShell(container) {
+  container.style.display = "flex";
+  container.style.flexDirection = "column";
+  container.style.flex = "1";
+  container.style.minHeight = "0";
   container.innerHTML = `
-  <div class="flex-between" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
-    <input id="dd-name" type="text" value="${esc(S.name)}" style="font-family:var(--font-serif);font-size:20px;border:none;background:transparent;padding:4px 0;min-width:140px"/>
-    <button class="btn btn-primary" id="dd-save">Save</button>
-  </div>
   <div style="position:relative">
-    <div id="dd-toolbar" class="flex gap-1" style="background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:5px;flex-wrap:wrap"></div>
+    <div id="dd-toolbar" class="flex gap-1" style="background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:5px;flex-wrap:wrap;margin-bottom:8px"></div>
     <div id="dd-popup" class="hidden" style="position:absolute;top:100%;margin-top:4px;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:6px;z-index:20"></div>
   </div>
-  <div style="display:flex;gap:8px;margin-top:8px;width:100%;min-width:0">
-    <div class="panel" id="dd-palette" style="padding:8px;width:120px;flex-shrink:0;height:560px;overflow-y:auto"></div>
-    <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;height:560px;flex:1;min-width:0;touch-action:none">
+  <div style="display:flex;gap:8px;flex:1;min-height:0">
+    <div style="display:flex;flex-direction:column;gap:8px;width:140px;flex-shrink:0">
+      <div style="padding:10px 8px 8px;background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+        <input id="dd-name" type="text" value="${esc(S.name)}"
+          style="font-family:var(--font-serif);font-size:16px;border:none;background:transparent;
+          padding:2px 0;width:100%;color:var(--color-text);outline:none;margin-bottom:8px;
+          border-bottom:1px solid var(--color-border)"/>
+        <button class="btn btn-primary" id="dd-save" style="width:100%;padding:6px 0">Save</button>
+      </div>
+      <div class="panel" id="dd-palette" style="padding:8px;flex:1;overflow-y:auto;min-height:0"></div>
+    </div>
+    <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;flex:1;min-width:0;min-height:0;touch-action:none">
       <svg id="dd-svg" width="100%" height="100%" style="display:block;cursor:grab">
         <defs>
           <pattern id="grid" width="${GRID_SIZE}" height="${GRID_SIZE}" patternUnits="userSpaceOnUse">
