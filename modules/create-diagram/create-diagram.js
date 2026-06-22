@@ -180,8 +180,8 @@ function buildShell(container) {
       </div>
       <div class="panel" id="dd-palette" style="padding:8px;flex:1;overflow-y:auto;min-height:0"></div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0;min-height:0;overflow:hidden">
-    <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;flex:1;min-width:0;min-height:0;touch-action:none">
+    <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0;min-height:0;overflow:hidden;height:100%">
+    <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;flex:1;width:100%;min-height:0;touch-action:none">
       <svg id="dd-svg" width="100%" height="100%" style="display:block;cursor:grab">
         <defs>
           <pattern id="grid" width="${GRID_SIZE}" height="${GRID_SIZE}" patternUnits="userSpaceOnUse">
@@ -209,8 +209,8 @@ function buildShell(container) {
       <div id="dd-conn-bar" class="hidden" style="position:absolute;top:6px;left:6px;right:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:5px 8px;z-index:5;font-size:10px"></div>
       <div id="dd-zoom-label" style="position:absolute;bottom:8px;right:8px;font-size:11px;color:var(--color-text-tertiary);background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:4px;padding:3px 7px;cursor:pointer">100%</div>
     </div>
-      <div class="panel" style="flex-shrink:0;max-height:180px;overflow-y:auto">
-        <span class="label">Saved diagrams</span>
+      <div class="panel" style="flex-shrink:0;height:160px;overflow-y:auto;min-height:0">
+        <span class="label" style="font-size:10px;letter-spacing:0.1em;opacity:0.7">SAVED DIAGRAMS</span>
         <div id="dd-saved"></div>
       </div>
     </div>
