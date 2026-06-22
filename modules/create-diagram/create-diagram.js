@@ -32,6 +32,7 @@ const SHAPES = [
   { type: "person",        label: "Actor",       w: 70,  h: 100, icon: `<circle cx="12" cy="7" r="3"/><path d="M7 21v-4a5 5 0 0 1 10 0v4"/>` },
   { type: "document",      label: "Document",    w: 120, h: 80,  icon: `<path d="M4 4h16v13c-2 0-2 2-4 2s-2-2-4-2-2 2-4 2-2-2-4-2z"/>` },
   { type: "text",          label: "Text",        w: 100, h: 32,  icon: `<line x1="6" y1="7" x2="18" y2="7"/><line x1="12" y1="7" x2="12" y2="18"/><line x1="9" y1="18" x2="15" y2="18"/>` },
+  { type: "group",         label: "Group",       w: 240, h: 180, icon: `<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="3 2" fill="none"/><line x1="3" y1="8" x2="12" y2="8"/>` },
   { type: "sync",          label: "Sync",        w: 80,  h: 80,  icon: `<path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>` },
   { type: "key",           label: "Key",         w: 100, h: 50,  icon: `<circle cx="8" cy="12" r="4"/><path d="M12 12h8"/><path d="M17 9v6"/><path d="M20 9v6"/>` },
   { type: "server",        label: "Server",      w: 90,  h: 100, icon: `<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/><circle cx="8" cy="7" r="1" fill="currentColor"/><circle cx="8" cy="17" r="1" fill="currentColor"/>` },
@@ -908,7 +909,7 @@ function drawNode(node) {
   } else {
     shape = buildShape(node);
     const t = theme();
-    const fill = node.type === "text" ? "transparent" : (node.fill || t.fill);
+    const fill = (node.type === "text" || node.type === "group") ? "transparent" : (node.fill || t.fill);
     shape.setAttribute("fill", fill);
     if (node.type !== "text") {
       shape.setAttribute("stroke", isSel ? t.sel : t.stroke);
@@ -921,9 +922,9 @@ function drawNode(node) {
   // label (skip for image nodes or show below)
   if (node.type !== "image") {
     const txt = svgEl("text");
-    txt.setAttribute("x", node.x + node.w/2);
+    txt.setAttribute("x", labelX(node));
     txt.setAttribute("y", labelY(node));
-    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("text-anchor", labelAnchor(node));
     const fontSize = node.fontSize || 12;
     const t = theme();
     const nodeFill = node.type === "text" ? "transparent" : (node.fill || t.fill);
@@ -1068,8 +1069,9 @@ function drawNode(node) {
     tapT = now;
     setSel({ k: "node", id: node.id });
     if (S.pendingColor !== null && S.pendingColor !== undefined) {
-      node.fill = S.pendingColor; S.pendingColor = null; draw();
+      node.fill = S.pendingColor; S.pendingColor = null; draw(); return;
     }
+    if (node.type !== "text") showNodeFloat(node);
   });
 
   // When connect tool is armed, mousedown on any box starts a connection from it
@@ -1125,13 +1127,86 @@ function showNodeFloat(node) {
   const y = node.y * S.zoom + S.pan.y;
   el.float.style.left = x+"px"; el.float.style.top = y+"px";
   el.float.classList.remove("hidden");
-  el.float.innerHTML = COLORS.slice(0,7).map(c => {
-    const active = (node.fill||"") === c.key;
-    return `<button data-nclr="${c.key}" style="width:18px;height:18px;border-radius:50%;background:${c.hex};border:2px solid ${active?"#fff":"rgba(255,255,255,.2)"};padding:0;cursor:pointer"></button>`;
-  }).join("");
+  el.float.innerHTML =
+    COLORS.slice(0,7).map(c => {
+      const active = (node.fill||"") === c.key;
+      return `<button data-nclr="${c.key}" style="width:18px;height:18px;border-radius:50%;background:${c.hex};border:2px solid ${active?"#fff":"rgba(255,255,255,.2)"};padding:0;cursor:pointer" title="${c.label}"></button>`;
+    }).join("") +
+    `<div style="width:1px;background:var(--color-border);margin:0 3px"></div>` +
+    `<button id="dd-convert-btn" title="Convert shape" style="background:none;border:none;cursor:pointer;padding:2px 5px;font-size:13px;color:var(--color-text);border-radius:4px;line-height:1">⇄</button>`;
+
   el.float.querySelectorAll("[data-nclr]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation(); snap(); node.fill = b.dataset.nclr||null; draw();
   }));
+
+  document.getElementById("dd-convert-btn").addEventListener("click", e => {
+    e.stopPropagation();
+    openConvertPopup(node);
+  });
+}
+
+/** Shows the shape-type picker popup anchored below the convert button */
+function openConvertPopup(node) {
+  // remove any existing convert popup
+  const old = document.getElementById("dd-convert-popup");
+  if (old) { old.remove(); return; }
+
+  const popup = document.createElement("div");
+  popup.id = "dd-convert-popup";
+  popup.style.cssText = `
+    position:absolute;
+    background:var(--color-bg-raised);
+    border:1px solid var(--color-border-strong);
+    border-radius:var(--radius-md);
+    padding:6px;
+    z-index:30;
+    display:grid;
+    grid-template-columns:repeat(5,36px);
+    gap:4px;
+    box-shadow:0 4px 16px rgba(0,0,0,.4);
+  `;
+
+  // Position below the float bar
+  const floatRect = el.float.getBoundingClientRect();
+  const wrapRect = document.getElementById("dd-canvas-wrap").getBoundingClientRect();
+  popup.style.left = (floatRect.left - wrapRect.left) + "px";
+  popup.style.top  = (floatRect.bottom - wrapRect.top + 4) + "px";
+
+  // Exclude 'text', 'image', 'group' from convert targets (structural types)
+  const convertable = SHAPES.filter(s => s.type !== "image");
+  convertable.forEach(s => {
+    const btn = document.createElement("button");
+    const isActive = node.type === s.type;
+    btn.title = s.label;
+    btn.style.cssText = `
+      width:36px;height:36px;padding:2px;border-radius:6px;cursor:pointer;border:none;
+      background:${isActive ? "var(--color-primary)" : "transparent"};
+      display:flex;align-items:center;justify-content:center;
+    `;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22"
+      fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+      style="color:${isActive ? "#000" : "var(--color-text)"}">
+      ${s.icon}
+    </svg>`;
+    btn.addEventListener("mouseenter", () => { if (!isActive) btn.style.background = "var(--color-bg-hover,rgba(255,255,255,.08))"; });
+    btn.addEventListener("mouseleave", () => { if (!isActive) btn.style.background = "transparent"; });
+    btn.addEventListener("click", e => {
+      e.stopPropagation();
+      snap();
+      node.type = s.type;
+      popup.remove();
+      draw();
+    });
+    popup.appendChild(btn);
+  });
+
+  document.getElementById("dd-canvas-wrap").appendChild(popup);
+
+  // close on next outside click
+  const close = e => {
+    if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener("click", close); }
+  };
+  setTimeout(() => document.addEventListener("click", close), 10);
 }
 
 /** Shows font size +/- and text color controls when a text node is selected. */
@@ -1161,7 +1236,12 @@ function showTextFloat(node) {
     e.stopPropagation(); snap(); node.textColor = b.dataset.txclr || null; draw();
   }));
 }
-function hideFloat() { el.float && el.float.classList.add("hidden"); el.connBar && el.connBar.classList.add("hidden"); }
+function hideFloat() {
+  el.float && el.float.classList.add("hidden");
+  el.connBar && el.connBar.classList.add("hidden");
+  const cp = document.getElementById("dd-convert-popup");
+  if (cp) cp.remove();
+}
 
 // ================================================================
 // DRAW CONNECTOR
@@ -1456,6 +1536,7 @@ function attachDrag(g, node) {
   };
   const up = () => {
     if(node._dragged&&pre){S.undo.push(pre);if(S.undo.length>MAX_UNDO)S.undo.shift();S.redo=[];buildToolbar();}
+    if(node._dragged && node.type !== "text") showNodeFloat(node);
     start=null; pre=null; off(mv,up);
   };
   g.addEventListener("mousedown",dn);
@@ -1467,8 +1548,17 @@ function attachDrag(g, node) {
 // ================================================================
 
 function labelY(node) {
-  if (node.type === "list") return node.y + Math.min(node.h*.22, 32)/2 + 4;
+  if (node.type === "list")  return node.y + Math.min(node.h*.22, 32)/2 + 4;
+  if (node.type === "group") return node.y + 16;
   return node.y + node.h/2 + 5;
+}
+function labelX(node) {
+  if (node.type === "group") return node.x + 10;
+  return node.x + node.w/2;
+}
+function labelAnchor(node) {
+  if (node.type === "group") return "start";
+  return "middle";
 }
 
 function buildShape(node) {
@@ -1486,6 +1576,12 @@ function buildShape(node) {
     case "document":      { const wH=h*.15; return mkEl("path",{d:`M${x} ${y}H${x+w}V${y+h-wH}C${x+w*.75} ${y+h+wH} ${x+w*.25} ${y+h-wH*2} ${x} ${y+h}Z`}); }
     case "person":        { const hr=w*.28, hcy=y+hr+2; const g=svgEl("g"); g.appendChild(mkEl("circle",{cx,cy:hcy,r:hr})); g.appendChild(mkEl("path",{d:`M${x+w*.08} ${y+h}Q${x+w*.08} ${hcy+hr*1.6} ${cx} ${hcy+hr*1.6}Q${x+w*.92} ${hcy+hr*1.6} ${x+w*.92} ${y+h}`})); return g; }
     case "rounded":       return mkEl("rect",{x,y,width:w,height:h,rx:18});
+    case "group": {
+      const g=svgEl("g");
+      const rect=mkEl("rect",{x,y,width:w,height:h,rx:6,"stroke-dasharray":"8 4"});
+      g.appendChild(rect);
+      return g;
+    }
     case "text":          return mkEl("rect",{x,y,width:w,height:h,rx:4,"stroke-dasharray":"3 2",stroke:"rgba(212,255,58,0.3)","stroke-width":"0.8"});
     case "image":         return mkEl("rect",{x,y,width:w,height:h,rx:4});
     case "sync": {
@@ -1649,14 +1745,14 @@ async function downloadPng() {
   });
 
   S.nodes.forEach(n => {
-    const fill = n.type==="text"?"transparent":(n.fill||t.fill);
-    const stroke = n.type==="text"?"none":t.stroke;
+    const fill = (n.type==="text" || n.type==="group") ? "transparent" : (n.fill||t.fill);
+    const stroke = (n.type==="text") ? "none" : t.stroke;
     const rot = n.rotate ? `rotate(${n.rotate},${n.x+n.w/2},${n.y+n.h/2})` : null;
     if (rot) svg += `<g transform="${rot}">`;
     svg += shapeToSvgStr(n, fill, stroke);
     const fontSize = n.fontSize || 12;
     const tc = n.textColor || (lightOrDark(fill)==="dark"?t.text:"#0c0b09");
-    svg += `<text x="${n.x+n.w/2}" y="${labelY(n)}" text-anchor="middle" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    svg += `<text x="${labelX(n)}" y="${labelY(n)}" text-anchor="${labelAnchor(n)}" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
     if (rot) svg += `</g>`;
   });
 
@@ -1686,6 +1782,7 @@ function shapeToSvgStr(node, fill, stroke) {
     case "document": { const wH=h*.15; return `<path d="M${x} ${y}H${x+w}V${y+h-wH}C${x+w*.75} ${y+h+wH} ${x+w*.25} ${y+h-wH*2} ${x} ${y+h}Z" ${fa} ${sa}/>`; }
     case "person": { const hr=w*.28,hcy=y+hr+2; return `<g ${fa} ${sa}><circle cx="${cx}" cy="${hcy}" r="${hr}"/><path d="M${x+w*.08} ${y+h}Q${x+w*.08} ${hcy+hr*1.6} ${cx} ${hcy+hr*1.6}Q${x+w*.92} ${hcy+hr*1.6} ${x+w*.92} ${y+h}"/></g>`; }
     case "rounded": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="18" ${fa} ${sa}/>`;
+    case "group":   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="transparent" stroke="${stroke}" stroke-width="2" stroke-dasharray="8 4"/>`;
     case "text": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="transparent"/>`;
     case "image": return node.imageData ? `<image href="${node.imageData}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>` : "";
     case "sync": { const r=Math.min(w,h)*.35; return `<g ${sa} fill="none"><path d="M${cx+r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy-r}"/><polygon points="${cx-4},${cy-r-5} ${cx},${cy-r} ${cx-4},${cy-r+5}" ${fa}/><path d="M${cx-r} ${cy} A${r} ${r} 0 1 1 ${cx} ${cy+r}"/><polygon points="${cx+4},${cy+r-5} ${cx},${cy+r} ${cx+4},${cy+r+5}" ${fa}/></g>`; }
