@@ -425,8 +425,8 @@ function renderDiagramSvg(diagram) {
     return;
   }
 
-  // Compute bounding box
-  const pad = 24;
+  // Compute bounding box with padding
+  const pad = 32;
   const minX = Math.min(...nodes.map(n=>n.x)) - pad;
   const minY = Math.min(...nodes.map(n=>n.y)) - pad;
   const maxX = Math.max(...nodes.map(n=>n.x+n.w)) + pad;
@@ -435,22 +435,48 @@ function renderDiagramSvg(diagram) {
 
   const theme = diagram.theme || "dark";
   const THEMES = {
-    dark:  { bg:"#0e1e2e", fill:"#0a1520", stroke:"#5ab8ff", text:"#e8f4ff" },
-    light: { bg:"#f0f4f8", fill:"#ffffff", stroke:"#2563eb", text:"#1e293b" },
-    mono:  { bg:"#111",    fill:"#1a1a1a", stroke:"#ffffff", text:"#ffffff" },
+    dark:  { bg:"#0e1e2e", fill:"#0a1520", stroke:"#5ab8ff", text:"#e8f4ff", conn:"#5ab8ff" },
+    light: { bg:"#f0f4f8", fill:"#ffffff", stroke:"#2563eb", text:"#1e293b", conn:"#2563eb" },
+    mono:  { bg:"#111",    fill:"#1a1a1a", stroke:"#ffffff", text:"#ffffff", conn:"#ffffff" },
   };
   const t = THEMES[theme] || THEMES.dark;
 
-  // Build connector paths
+  // Helper: compute best edge midpoint from node toward a target center
+  function edgePt(n, tx, ty) {
+    const cx = n.x + n.w/2 - minX, cy = n.y + n.h/2 - minY;
+    const dx = tx - cx, dy = ty - cy;
+    const x = n.x - minX, y = n.y - minY;
+    if (Math.abs(dx) * n.h > Math.abs(dy) * n.w) {
+      // exit left or right
+      return dx > 0
+        ? { x: x + n.w, y: cy }
+        : { x: x,       y: cy };
+    } else {
+      // exit top or bottom
+      return dy > 0
+        ? { x: cx, y: y + n.h }
+        : { x: cx, y: y };
+    }
+  }
+
+  // Build connector paths with proper edge points and arrowheads
   let connSvg = "";
   conns.forEach(c => {
     const from = nodes.find(n=>n.id===c.from), to = nodes.find(n=>n.id===c.to);
     if (!from||!to) return;
-    const x1=from.x+from.w/2-minX, y1=from.y+from.h/2-minY;
-    const x2=to.x+to.w/2-minX,   y2=to.y+to.h/2-minY;
-    connSvg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-      stroke="${t.stroke}" stroke-width="1.5" opacity="0.6"
+    const fcx = from.x+from.w/2 - minX, fcy = from.y+from.h/2 - minY;
+    const tcx = to.x+to.w/2   - minX,  tcy = to.y+to.h/2   - minY;
+    const p1 = edgePt(from, tcx, tcy);
+    const p2 = edgePt(to,   fcx, fcy);
+    const dash = c.lineStyle==="dashed" ? "stroke-dasharray='6 3'" : c.lineStyle==="dotted" ? "stroke-dasharray='2 4'" : "";
+    connSvg += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"
+      stroke="${t.conn}" stroke-width="1.5" opacity="0.75" ${dash}
       marker-end="url(#live-ah)"/>`;
+    if (c.label) {
+      const mx=(p1.x+p2.x)/2, my=(p1.y+p2.y)/2;
+      connSvg += `<text x="${mx}" y="${my-5}" text-anchor="middle" font-size="10"
+        font-family="monospace" fill="${t.text}" opacity="0.8">${escapeHtml(c.label)}</text>`;
+    }
   });
 
   // Build node shapes
@@ -461,23 +487,27 @@ function renderDiagramSvg(diagram) {
     const stroke = n.strokeColor || t.stroke;
     const dash = n.borderStyle==="dashed"?" stroke-dasharray='8 4'"
                : n.borderStyle==="dotted"?" stroke-dasharray='2 4'" : "";
-    // Simple rounded rect for all types in preview
-    const rx = (n.type==="rounded"||n.type==="ellipse"||n.type==="group") ? Math.min(w,h)*0.2 : 4;
+    const rx = (n.type==="ellipse") ? w/2
+             : (n.type==="rounded"||n.type==="group") ? Math.min(w,h)*0.18 : 4;
     nodeSvg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"
       fill="${fill}" stroke="${stroke}" stroke-width="1.5"${dash}/>`;
     if (n.label) {
-      nodeSvg += `<text x="${x+w/2}" y="${y+h/2+4}" text-anchor="middle"
-        font-size="${Math.min(n.fontSize||12,13)}" font-family="monospace"
+      const labelY = n.type==="list" ? y+Math.min(h*.22,32)/2+4 : y+h/2+4;
+      const anchor = n.type==="group" ? "start" : "middle";
+      const lx     = n.type==="group" ? x+10 : x+w/2;
+      const fs = Math.min(n.fontSize||12, 13);
+      nodeSvg += `<text x="${lx}" y="${labelY}" text-anchor="${anchor}"
+        font-size="${fs}" font-family="monospace"
         fill="${t.text}" style="pointer-events:none">${escapeHtml(n.label)}</text>`;
     }
   });
 
   wrap.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg"
     viewBox="0 0 ${vw} ${vh}" width="100%"
-    style="max-height:420px;display:block;background:${t.bg}">
+    style="max-height:460px;display:block;background:${t.bg}">
     <defs>
-      <marker id="live-ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-        <polygon points="0 0,8 4,0 8" fill="${t.stroke}" opacity="0.7"/>
+      <marker id="live-ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <polygon points="0 0,8 4,0 8" fill="${t.conn}" opacity="0.85"/>
       </marker>
     </defs>
     ${connSvg}${nodeSvg}
@@ -485,15 +515,17 @@ function renderDiagramSvg(diagram) {
 }
 
 async function explainLiveDiagram(diagram) {
-  const panel = document.getElementById("adm-live-explanation-panel");
+  const panel      = document.getElementById("adm-live-explanation-panel");
   const skeletonEl = document.getElementById("adm-live-skeleton");
-  const textEl = document.getElementById("adm-live-text");
-  const badgeEl = document.getElementById("adm-live-badge");
+  const textEl     = document.getElementById("adm-live-text");
+  const badgeEl    = document.getElementById("adm-live-badge");
+  const btn        = document.getElementById("adm-live-explain-btn");
 
   panel.style.display = "block";
   skeletonEl.classList.remove("hidden");
   textEl.innerHTML = "";
   badgeEl.classList.add("hidden");
+  if (btn) { btn.disabled = true; btn.textContent = "Analyzing…"; }
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const { provider, apiKey } = await loadApiConfig();
@@ -501,70 +533,71 @@ async function explainLiveDiagram(diagram) {
     skeletonEl.classList.add("hidden");
     textEl.innerHTML = `<p style="color:var(--color-text-tertiary);font-size:13px">
       No API key configured — go to <strong>Settings</strong> to add one.</p>`;
+    if (btn) { btn.disabled = false; btn.textContent = "⬡ Explain this"; }
     return;
   }
 
-  // Build a text description of the diagram for the AI
+  // Build structured text description of the diagram
   const nodes = diagram.nodes || [];
-  const conns = diagram.conns || [];
-  const nodeDesc = nodes.map(n => `- ${n.type} node "${n.label||"(unlabelled)"}" at (${n.x},${n.y}) size ${n.w}x${n.h}`).join("\n");
+  const conns  = diagram.conns  || [];
+  const nodeDesc = nodes.map(n =>
+    `- [${n.type}] "${n.label||"(unlabelled)"}"${n.fill?" fill="+n.fill:""}`
+  ).join("\n");
   const connDesc = conns.map(c => {
     const f = nodes.find(n=>n.id===c.from), t2 = nodes.find(n=>n.id===c.to);
-    return `- "${f?.label||c.from}" → "${t2?.label||c.to}"${c.label?" ("+c.label+")":""}`;
-  }).join("\n");
+    return `- "${f?.label||"?"}" → "${t2?.label||"?"}"${c.label?" ("+c.label+")":""}`;
+  }).join("\n") || "(no connections)";
 
-  const prompt = `You are analyzing an architecture diagram described in structured text below.
+  const userPrompt =
+    `You are analyzing a software architecture diagram described in structured text.\n\n` +
+    `Diagram name: "${diagram.name || "Untitled"}"\n\n` +
+    `Components:\n${nodeDesc || "(none)"}\n\n` +
+    `Connections:\n${connDesc}\n\n` +
+    `Provide a clear, concise explanation:\n\n` +
+    `## Overview\nOne sentence describing what this system/flow does.\n\n` +
+    `## Components\nBrief role of each key component — use the exact names above in **bold**.\n\n` +
+    `## Flow\nStep-by-step numbered walkthrough of how data/requests move through the system.\n\n` +
+    `## Key Points\n2-3 notable design decisions or things to be aware of.\n\n` +
+    `Start immediately with "## Overview" — no preamble.`;
 
-Diagram name: "${diagram.name || "Untitled"}"
-
-Nodes (shapes):
-${nodeDesc || "(none)"}
-
-Connections:
-${connDesc || "(none)"}
-
-Provide a clear, concise explanation of this diagram:
-
-## Overview
-One sentence describing what this system/flow does.
-
-## Components
-Brief role of each key component (use the exact names above in **bold**).
-
-## Flow
-Step-by-step numbered walkthrough of how data/requests move through the system.
-
-## Key Points
-2-3 notable design decisions or things to be aware of.
-
-Start immediately with "## Overview" — no preamble.`;
-
+  // Use the same API infrastructure as the upload-based tabs
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    // Build a text-only message using the existing buildRequest pattern
+    const messages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user",   content: userPrompt },
+    ];
+    const req = buildRequest(provider, apiKey, messages);
+    // For text-only, keep the same body but ensure we're not sending image payload
+    req.body.messages = messages;
+
+    const res = await fetch(req.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: prompt }]
-      })
+      headers: req.headers,
+      body: JSON.stringify(req.body),
     });
 
-    if (!res.ok) throw new Error(`API error ${res.status}`);
+    if (!res.ok) {
+      let detail = `${res.status}`;
+      try { const e = await res.json(); if (e.error?.message) detail += ` — ${e.error.message}`; } catch(_){}
+      throw new Error(`${provider} API error (${detail})`);
+    }
+
     const data = await res.json();
-    const text = data.content?.map(b=>b.text||"").join("") || "";
+    const text = extractContent(data);
 
     skeletonEl.classList.add("hidden");
     badgeEl.classList.remove("hidden");
-    badgeEl.textContent = "Generated by Claude";
+    badgeEl.textContent = `Generated by ${provider}`;
     textEl.innerHTML = renderMarkdown(stripFiller(text));
   } catch (err) {
     skeletonEl.classList.add("hidden");
-    textEl.innerHTML = `<p style="color:var(--color-danger,#ff5a4e);font-size:13px">
-      Error: ${escapeHtml(err.message)}</p>
+    const hint = getErrorHint(err, provider);
+    textEl.innerHTML = `<p style="color:var(--color-danger,#ff5a4e);font-size:13px">${escapeHtml(hint)}</p>
       <button class="adm-retry-btn" id="adm-live-retry">↻ Retry</button>`;
     document.getElementById("adm-live-retry")?.addEventListener("click", () => explainLiveDiagram(diagram));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "⬡ Explain this"; }
   }
 }
 
