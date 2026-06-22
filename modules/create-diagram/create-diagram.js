@@ -169,9 +169,9 @@ function buildShell(container) {
     <div id="dd-toolbar" class="flex gap-1" style="background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:5px;flex-wrap:wrap;margin-bottom:8px"></div>
     <div id="dd-popup" class="hidden" style="position:absolute;top:100%;margin-top:4px;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:6px;z-index:20"></div>
   </div>
-  <div style="display:flex;gap:8px;flex:1;min-height:0">
-    <div style="display:flex;flex-direction:column;gap:8px;width:140px;flex-shrink:0">
-      <div style="padding:10px 8px 8px;background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--radius-md)">
+  <div style="display:flex;gap:8px;flex:1;min-height:0;overflow:hidden">
+    <div style="display:flex;flex-direction:column;gap:8px;width:140px;flex-shrink:0;overflow:hidden">
+      <div style="padding:10px 8px 8px;background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:var(--radius-md);flex-shrink:0">
         <input id="dd-name" type="text" value="${esc(S.name)}"
           style="font-family:var(--font-serif);font-size:16px;border:none;background:transparent;
           padding:2px 0;width:100%;color:var(--color-text);outline:none;margin-bottom:8px;
@@ -180,6 +180,7 @@ function buildShell(container) {
       </div>
       <div class="panel" id="dd-palette" style="padding:8px;flex:1;overflow-y:auto;min-height:0"></div>
     </div>
+    <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0;min-height:0;overflow:hidden">
     <div class="panel corner-frame" id="dd-canvas-wrap" style="position:relative;padding:0;overflow:hidden;flex:1;min-width:0;min-height:0;touch-action:none">
       <svg id="dd-svg" width="100%" height="100%" style="display:block;cursor:grab">
         <defs>
@@ -208,8 +209,12 @@ function buildShell(container) {
       <div id="dd-conn-bar" class="hidden" style="position:absolute;top:6px;left:6px;right:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;background:var(--color-bg-raised);border:1px solid var(--color-border-strong);border-radius:var(--radius-md);padding:5px 8px;z-index:5;font-size:10px"></div>
       <div id="dd-zoom-label" style="position:absolute;bottom:8px;right:8px;font-size:11px;color:var(--color-text-tertiary);background:var(--color-bg-raised);border:1px solid var(--color-border);border-radius:4px;padding:3px 7px;cursor:pointer">100%</div>
     </div>
-  </div>
-  <div class="panel mt-2"><span class="label">Saved diagrams</span><div id="dd-saved"></div></div>`;
+      <div class="panel" style="flex-shrink:0;max-height:180px;overflow-y:auto">
+        <span class="label">Saved diagrams</span>
+        <div id="dd-saved"></div>
+      </div>
+    </div>
+  </div>`;
 
   el.svg     = document.getElementById("dd-svg");
   el.vp      = document.getElementById("dd-vp");
