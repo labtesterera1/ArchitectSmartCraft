@@ -872,6 +872,12 @@ function drawNode(node) {
   const isSel = S.sel && S.sel.k === "node" && S.sel.id === node.id;
   const g = svgEl("g"); g.style.cursor = "grab";
 
+  // apply rotation around the node's center if set
+  if (node.rotate) {
+    const cx = node.x + node.w/2, cy = node.y + node.h/2;
+    g.setAttribute("transform", `rotate(${node.rotate},${cx},${cy})`);
+  }
+
   // invisible hit-area covering the full bounding box — guarantees click/drag works
   // even for hollow/outline shapes (sync, check, arrows, elbow, etc.) where the
   // visible geometry has no fill and clicks would otherwise only land on thin strokes.
@@ -930,18 +936,123 @@ function drawNode(node) {
     g.appendChild(txt);
   }
 
-  // edge handles (for connecting)
+  // edge handles (for connecting) + corner resize handles + rotate handle
   if (isSel) {
-    handles(node).forEach(h => {
-      const dot = svgEl("circle");
-      dot.setAttribute("cx", h.x); dot.setAttribute("cy", h.y);
-      dot.setAttribute("r", HANDLE_R);
-      dot.setAttribute("fill", theme().bg); dot.setAttribute("stroke", theme().handle); dot.setAttribute("stroke-width", "1.5");
-      dot.style.cursor = "crosshair"; dot.style.opacity = "0.8";
-      dot.addEventListener("mousedown", e => { e.stopPropagation(); startConnect(node.id, e); });
-      dot.addEventListener("touchstart", e => { e.stopPropagation(); startConnect(node.id, e); }, {passive:true});
+    const t2 = theme();
+
+    // ── Rotate handle (circle above top-center, with a line connecting it) ──
+    const rotCx = node.x + node.w/2;
+    const rotCy = node.y - 28;
+    const rotLine = mkEl("line", { x1: node.x+node.w/2, y1: node.y, x2: rotCx, y2: rotCy,
+      stroke: t2.handle, "stroke-width": "1.5", "stroke-dasharray": "3 2" });
+    rotLine.style.pointerEvents = "none";
+    g.appendChild(rotLine);
+
+    const rotDot = svgEl("circle");
+    rotDot.setAttribute("cx", rotCx); rotDot.setAttribute("cy", rotCy);
+    rotDot.setAttribute("r", 7);
+    rotDot.setAttribute("fill", t2.sel); rotDot.setAttribute("stroke", "#fff"); rotDot.setAttribute("stroke-width", "1.5");
+    rotDot.style.cursor = "crosshair";
+    rotDot.innerHTML = "";
+    rotDot.addEventListener("mousedown", e => {
+      e.stopPropagation();
+      const cx = node.x + node.w/2, cy = node.y + node.h/2;
+      const startAngle = (node.rotate || 0);
+      const startEvtAngle = Math.atan2(svgPt(e).y - cy, svgPt(e).x - cx) * 180 / Math.PI;
+      const pre = { nodes: structuredClone(S.nodes), conns: structuredClone(S.conns) };
+      const mv = e2 => {
+        const p = svgPt(e2);
+        const angle = Math.atan2(p.y - cy, p.x - cx) * 180 / Math.PI;
+        node.rotate = startAngle + (angle - startEvtAngle);
+        draw();
+      };
+      const up = () => { S.undo.push(pre); S.redo=[]; buildToolbar(); off(mv, up); };
+      listen(mv, up);
+    });
+    rotDot.addEventListener("touchstart", e => {
+      e.stopPropagation();
+      const cx = node.x + node.w/2, cy = node.y + node.h/2;
+      const startAngle = (node.rotate || 0);
+      const startEvtAngle = Math.atan2(svgPt(e).y - cy, svgPt(e).x - cx) * 180 / Math.PI;
+      const pre = { nodes: structuredClone(S.nodes), conns: structuredClone(S.conns) };
+      const mv = e2 => {
+        const p = svgPt(e2);
+        const angle = Math.atan2(p.y - cy, p.x - cx) * 180 / Math.PI;
+        node.rotate = startAngle + (angle - startEvtAngle);
+        draw();
+      };
+      const up = () => { S.undo.push(pre); S.redo=[]; buildToolbar(); off(mv, up); };
+      listen(mv, up);
+    }, { passive: true });
+    g.appendChild(rotDot);
+
+    // ── 8 resize handles (4 corners + 4 edge midpoints) ──
+    const resizeHandles = [
+      { id:"nw", cx:node.x,           cy:node.y,           cursor:"nw-resize" },
+      { id:"n",  cx:node.x+node.w/2,  cy:node.y,           cursor:"n-resize"  },
+      { id:"ne", cx:node.x+node.w,    cy:node.y,           cursor:"ne-resize" },
+      { id:"e",  cx:node.x+node.w,    cy:node.y+node.h/2,  cursor:"e-resize"  },
+      { id:"se", cx:node.x+node.w,    cy:node.y+node.h,    cursor:"se-resize" },
+      { id:"s",  cx:node.x+node.w/2,  cy:node.y+node.h,    cursor:"s-resize"  },
+      { id:"sw", cx:node.x,           cy:node.y+node.h,    cursor:"sw-resize" },
+      { id:"w",  cx:node.x,           cy:node.y+node.h/2,  cursor:"w-resize"  },
+    ];
+
+    resizeHandles.forEach(h => {
+      const isCorner = ["nw","ne","se","sw"].includes(h.id);
+
+      // corner = filled square; edge midpoint = open circle (distinguishes resize from connect)
+      let dot;
+      if (isCorner) {
+        dot = mkEl("rect", {
+          x: h.cx - 5, y: h.cy - 5, width: 10, height: 10, rx: 2,
+          fill: t2.sel, stroke: "#fff", "stroke-width": "1.5"
+        });
+      } else {
+        dot = svgEl("circle");
+        dot.setAttribute("cx", h.cx); dot.setAttribute("cy", h.cy);
+        dot.setAttribute("r", HANDLE_R);
+        dot.setAttribute("fill", t2.bg); dot.setAttribute("stroke", t2.handle); dot.setAttribute("stroke-width", "1.5");
+      }
+      dot.style.cursor = h.cursor;
+
+      const startResize = e => {
+        e.stopPropagation();
+        const origX=node.x, origY=node.y, origW=node.w, origH=node.h;
+        const startPt = svgPt(e);
+        const pre = { nodes: structuredClone(S.nodes), conns: structuredClone(S.conns) };
+        const MIN = 30;
+        const mv = e2 => {
+          const p = svgPt(e2);
+          const dx = p.x - startPt.x, dy = p.y - startPt.y;
+          let nx=origX, ny=origY, nw=origW, nh=origH;
+          if (h.id.includes("e"))  nw = Math.max(MIN, origW + dx);
+          if (h.id.includes("s"))  nh = Math.max(MIN, origH + dy);
+          if (h.id.includes("w"))  { nw = Math.max(MIN, origW - dx); nx = origX + origW - nw; }
+          if (h.id.includes("n"))  { nh = Math.max(MIN, origH - dy); ny = origY + origH - nh; }
+          node.x=nx; node.y=ny; node.w=nw; node.h=nh;
+          draw();
+        };
+        const up = () => { S.undo.push(pre); S.redo=[]; buildToolbar(); off(mv, up); };
+        listen(mv, up);
+      };
+      dot.addEventListener("mousedown", startResize);
+      dot.addEventListener("touchstart", startResize, { passive: true });
       g.appendChild(dot);
     });
+
+    // ── Edge connector dots (separate crosshair dots on 4 midpoints for connect tool) ──
+    handles(node).forEach(h => {
+      const cdot = svgEl("circle");
+      cdot.setAttribute("cx", h.x); cdot.setAttribute("cy", h.y);
+      cdot.setAttribute("r", 4);
+      cdot.setAttribute("fill", t2.sel); cdot.setAttribute("stroke", "#fff"); cdot.setAttribute("stroke-width", "1");
+      cdot.style.cursor = "crosshair"; cdot.style.opacity = "0.7";
+      cdot.addEventListener("mousedown", e => { e.stopPropagation(); startConnect(node.id, e); });
+      cdot.addEventListener("touchstart", e => { e.stopPropagation(); startConnect(node.id, e); }, {passive:true});
+      g.appendChild(cdot);
+    });
+
     // show text formatting float only for text nodes
     if (node.type === "text") showTextFloat(node);
   }
@@ -1540,10 +1651,13 @@ async function downloadPng() {
   S.nodes.forEach(n => {
     const fill = n.type==="text"?"transparent":(n.fill||t.fill);
     const stroke = n.type==="text"?"none":t.stroke;
+    const rot = n.rotate ? `rotate(${n.rotate},${n.x+n.w/2},${n.y+n.h/2})` : null;
+    if (rot) svg += `<g transform="${rot}">`;
     svg += shapeToSvgStr(n, fill, stroke);
     const fontSize = n.fontSize || 12;
     const tc = n.textColor || (lightOrDark(fill)==="dark"?t.text:"#0c0b09");
     svg += `<text x="${n.x+n.w/2}" y="${labelY(n)}" text-anchor="middle" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    if (rot) svg += `</g>`;
   });
 
   svg += "</g></svg>";
