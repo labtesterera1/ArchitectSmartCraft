@@ -13,6 +13,6 @@
  * ----------------------------------------------------------------
  */
 
-export const APP_VERSION = "3.0.1";
+export const APP_VERSION = "3.0.2";
 export const APP_NAME = "ArchitectSmartCraft";
 export const APP_SHORT_NAME = "ASC";
