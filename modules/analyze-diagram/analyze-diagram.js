@@ -22,6 +22,7 @@
 
 import storage from "../../js/storage.js";
 import { loadApiConfig } from "../settings/settings.js";
+import { renderDiagramToPng } from "../create-diagram/create-diagram.js";
 
 /* ── Style definitions ─────────────────────────────────────────── */
 
@@ -105,6 +106,9 @@ let activeStyle        = "steps";
 let explanationCache   = {};
 let currentAnalysisId  = null;
 let isLoading          = false;
+/** Live diagram sub-tab state */
+let liveSubTab         = "explain";   // "explain" | "visualize"
+let liveSummaryCache   = null;        // { data, pngUrl, provider }
 
 /* ── Public entry point ────────────────────────────────────────── */
 
@@ -341,6 +345,20 @@ const MODULE_CSS = `
   }
   .adm-retry-btn:hover { background:rgba(255,90,78,.12); }
 
+  /* Sub-tab bar (inside Live Diagram) */
+  .adm-subtab-bar {
+    display:flex; gap:2px; border-bottom:1px solid var(--color-border);
+    margin-bottom:0; padding-bottom:0; margin-top:4px;
+  }
+  .adm-subtab {
+    padding:6px 14px; background:transparent; border:none; border-bottom:2px solid transparent;
+    color:var(--color-text-tertiary); font-family:var(--font-mono); font-size:11px;
+    letter-spacing:.05em; text-transform:uppercase; cursor:pointer;
+    transition:color .15s, border-color .15s; margin-bottom:-1px;
+  }
+  .adm-subtab:hover { color:var(--color-text); }
+  .adm-subtab.adm-subtab-active { color:var(--color-accent); border-bottom-color:var(--color-accent); }
+
   /* Analysis list */
   .adm-analysis-item { padding:10px 0; border-top:1px solid var(--color-border); }
   .adm-analysis-meta { font-size:11px; color:var(--color-text-tertiary); margin-top:2px; }
@@ -359,7 +377,6 @@ async function renderLiveDiagram() {
     <div class="adm-skeleton-line w40"></div>
   </div>`;
 
-  // Load saved diagrams list
   const list = await storage.diagrams.list().catch(() => []);
   if (!list || !list.length) {
     wrap.innerHTML = `<div class="panel" style="margin-top:8px;text-align:center;padding:32px 16px">
@@ -369,48 +386,408 @@ async function renderLiveDiagram() {
     return;
   }
 
-  // Pick most recently updated diagram
   const sorted = list.sort((a,b) => new Date(b.updatedAt||b.createdAt) - new Date(a.updatedAt||a.createdAt));
   let diagram = sorted[0];
+  liveSummaryCache = null;
 
   wrap.innerHTML = `
-    <div class="panel" style="margin-top:0">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <span class="label">Live diagram</span>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <select id="adm-diag-select" style="background:var(--color-bg-raised);border:1px solid var(--color-border);
-            border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-mono);
-            font-size:12px;padding:4px 8px;cursor:pointer">
-            ${sorted.map((d,i) => `<option value="${i}">${escapeHtml(d.name||"Untitled")}</option>`).join("")}
-          </select>
-          <button class="btn btn-primary" id="adm-live-explain-btn" style="font-size:12px;padding:5px 14px">⬡ Explain this</button>
+    <!-- Diagram selector header -->
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <span class="label" style="flex-shrink:0">Diagram</span>
+      <select id="adm-diag-select" style="background:var(--color-bg-raised);border:1px solid var(--color-border);
+        border-radius:var(--radius-sm);color:var(--color-text);font-family:var(--font-mono);
+        font-size:12px;padding:4px 8px;cursor:pointer;flex:1;min-width:0">
+        ${sorted.map((d,i)=>`<option value="${i}">${escapeHtml(d.name||"Untitled")}</option>`).join("")}
+      </select>
+    </div>
+
+    <!-- Sub-tab bar -->
+    <div class="adm-subtab-bar">
+      <button class="adm-subtab${liveSubTab==="explain"?" adm-subtab-active":""}" data-subtab="explain">⬡ Explain</button>
+      <button class="adm-subtab${liveSubTab==="visualize"?" adm-subtab-active":""}" data-subtab="visualize">◈ Visualize Summary</button>
+    </div>
+
+    <!-- Explain sub-panel -->
+    <div id="adm-sub-explain" style="display:${liveSubTab==="explain"?"block":"none"}">
+      <div class="panel" style="margin-top:8px">
+        <div id="adm-live-png-wrap" style="border:1px solid var(--color-border);border-radius:var(--radius-md);
+          overflow:hidden;background:var(--color-bg);text-align:center;margin-bottom:12px;min-height:120px;
+          display:flex;align-items:center;justify-content:center">
+          <span style="font-size:12px;color:var(--color-text-tertiary);opacity:.5">Rendering diagram…</span>
+        </div>
+        <div style="text-align:center">
+          <button class="btn btn-primary" id="adm-live-explain-btn" style="font-size:12px;padding:6px 18px">⬡ Explain this</button>
         </div>
       </div>
-      <div id="adm-live-svg-wrap" style="border:1px solid var(--color-border);border-radius:var(--radius-md);overflow:auto;background:var(--color-bg)"></div>
-    </div>
-    <div class="panel mt-2" id="adm-live-explanation-panel" style="display:none">
-      <div id="adm-live-badge" class="adm-provider-badge hidden"></div>
-      <div id="adm-live-skeleton" class="adm-skeleton hidden">
-        <div class="adm-skeleton-line w80"></div><div class="adm-skeleton-line w100"></div>
-        <div class="adm-skeleton-line w60"></div><div class="adm-skeleton-line w90"></div>
+      <div class="panel mt-2" id="adm-live-explanation-panel" style="display:none">
+        <div id="adm-live-badge" class="adm-provider-badge hidden"></div>
+        <div id="adm-live-skeleton" class="adm-skeleton hidden">
+          <div class="adm-skeleton-line w80"></div><div class="adm-skeleton-line w100"></div>
+          <div class="adm-skeleton-line w60"></div><div class="adm-skeleton-line w90"></div>
+        </div>
+        <div id="adm-live-text" class="adm-explanation"></div>
       </div>
-      <div id="adm-live-text" class="adm-explanation"></div>
+    </div>
+
+    <!-- Visualize Summary sub-panel -->
+    <div id="adm-sub-visualize" style="display:${liveSubTab==="visualize"?"block":"none"}">
+      <div id="adm-vis-content"></div>
     </div>
   `;
 
-  renderDiagramSvg(diagram);
+  // Render the PNG immediately
+  renderLivePng(diagram);
 
   // Diagram selector
   document.getElementById("adm-diag-select").addEventListener("change", e => {
     diagram = sorted[parseInt(e.target.value)];
-    renderDiagramSvg(diagram);
-    document.getElementById("adm-live-explanation-panel").style.display = "none";
+    liveSummaryCache = null;
+    renderLivePng(diagram);
+    const ep = document.getElementById("adm-live-explanation-panel");
+    if (ep) ep.style.display = "none";
+    if (liveSubTab === "visualize") renderVisualizeSummaryPanel(diagram, false);
+  });
+
+  // Sub-tab switching
+  wrap.querySelectorAll(".adm-subtab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      liveSubTab = btn.dataset.subtab;
+      wrap.querySelectorAll(".adm-subtab").forEach(b => b.classList.remove("adm-subtab-active"));
+      btn.classList.add("adm-subtab-active");
+      document.getElementById("adm-sub-explain").style.display    = liveSubTab==="explain"    ? "block":"none";
+      document.getElementById("adm-sub-visualize").style.display  = liveSubTab==="visualize"  ? "block":"none";
+      if (liveSubTab === "visualize") renderVisualizeSummaryPanel(diagram, false);
+    });
   });
 
   // Explain button
-  document.getElementById("adm-live-explain-btn").addEventListener("click", async () => {
-    await explainLiveDiagram(diagram);
+  document.getElementById("adm-live-explain-btn").addEventListener("click", () => explainLiveDiagram(diagram));
+
+  // If already on visualize tab
+  if (liveSubTab === "visualize") renderVisualizeSummaryPanel(diagram, false);
+}
+
+async function renderLivePng(diagram) {
+  const wrap = document.getElementById("adm-live-png-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = `<span style="font-size:12px;color:var(--color-text-tertiary);opacity:.5">Rendering…</span>`;
+  try {
+    const pngUrl = await renderDiagramToPng(diagram);
+    if (!pngUrl) {
+      wrap.innerHTML = `<p style="font-size:13px;color:var(--color-text-tertiary);padding:16px">No shapes in this diagram.</p>`;
+      return;
+    }
+    wrap.innerHTML = `<img src="${pngUrl}" style="max-width:100%;display:block;border-radius:var(--radius-md)" alt="${escapeHtml(diagram.name||"Diagram")}"/>`;
+  } catch(e) {
+    wrap.innerHTML = `<p style="font-size:13px;color:var(--color-danger,#ff5a4e);padding:16px">Could not render diagram: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function renderVisualizeSummaryPanel(diagram, autoGenerate) {
+  const wrap = document.getElementById("adm-vis-content");
+  if (!wrap) return;
+
+  // If cached, show it
+  if (liveSummaryCache) { renderSummaryCards(liveSummaryCache, diagram); return; }
+
+  wrap.innerHTML = `
+    <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap">
+      <!-- Left: PNG preview -->
+      <div class="panel" style="flex:1;min-width:280px;max-width:50%">
+        <span class="label">Diagram</span>
+        <div id="adm-vis-png-wrap" style="border:1px solid var(--color-border);border-radius:var(--radius-md);
+          overflow:hidden;margin-top:8px;min-height:100px;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:12px;color:var(--color-text-tertiary);opacity:.5">Rendering…</span>
+        </div>
+      </div>
+      <!-- Right: Summary placeholder -->
+      <div class="panel" style="flex:1;min-width:280px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <span class="label">Visualize Summary</span>
+          <div style="display:flex;gap:6px">
+            <button class="adm-action-btn" id="adm-vis-dl-text" style="display:none">⬇ Text</button>
+            <button class="adm-action-btn" id="adm-vis-dl-pdf"  style="display:none">⬇ PDF</button>
+          </div>
+        </div>
+        <div id="adm-vis-summary-wrap">
+          <div style="text-align:center;padding:32px 0">
+            <div style="font-size:28px;opacity:.25;margin-bottom:10px">◈</div>
+            <p style="font-size:13px;color:var(--color-text-tertiary)">Click the button to generate a visual summary of this diagram.</p>
+            <button class="btn btn-primary" id="adm-vis-gen-btn" style="margin-top:14px;padding:7px 22px">◈ Generate Summary</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Render PNG on left
+  (async () => {
+    const pngWrap = document.getElementById("adm-vis-png-wrap");
+    if (!pngWrap) return;
+    try {
+      const pngUrl = await renderDiagramToPng(diagram);
+      if (pngUrl) pngWrap.innerHTML = `<img src="${pngUrl}" style="max-width:100%;display:block;border-radius:var(--radius-md)"/>`;
+      else pngWrap.innerHTML = `<p style="font-size:12px;color:var(--color-text-tertiary);padding:12px">Empty diagram</p>`;
+    } catch(e) { pngWrap.innerHTML = `<p style="font-size:12px;color:var(--color-danger,#f55);padding:12px">${escapeHtml(e.message)}</p>`; }
+  })();
+
+  document.getElementById("adm-vis-gen-btn")?.addEventListener("click", () => generateVisualizeSummary(diagram));
+
+  if (autoGenerate) generateVisualizeSummary(diagram);
+}
+
+async function generateVisualizeSummary(diagram) {
+  const summaryWrap = document.getElementById("adm-vis-summary-wrap");
+  if (!summaryWrap) return;
+
+  summaryWrap.innerHTML = `<div class="adm-skeleton" style="margin-top:4px">
+    <div class="adm-skeleton-line w60"></div><div class="adm-skeleton-line w90"></div>
+    <div class="adm-skeleton-line w50"></div><div class="adm-skeleton-line w80"></div>
+    <div class="adm-skeleton-line w40"></div>
+  </div>`;
+
+  const { provider, apiKey } = await loadApiConfig();
+  if (!provider || !apiKey) {
+    summaryWrap.innerHTML = `<p style="font-size:13px;color:var(--color-text-tertiary);padding:12px 0">
+      No API key — go to <strong>Settings</strong> to add one.</p>`;
+    return;
+  }
+
+  const nodes = diagram.nodes || [];
+  const conns  = diagram.conns  || [];
+  const nodeDesc = nodes.map(n=>`- [${n.type}] "${n.label||"(unlabelled)"}"${n.fill?" fill="+n.fill:""}`).join("\n");
+  const connDesc = conns.map(c=>{
+    const f=nodes.find(n=>n.id===c.from), t2=nodes.find(n=>n.id===c.to);
+    return `- "${f?.label||"?"}" → "${t2?.label||"?"}"${c.label?" ("+c.label+")":""}`;
+  }).join("\n") || "(none)";
+
+  const prompt =
+    `Analyze this architecture diagram and respond ONLY with a valid JSON object — no markdown, no backticks, no prose before or after.\n\n` +
+    `Diagram: "${diagram.name||"Untitled"}"\n` +
+    `Components:\n${nodeDesc||"(none)"}\n` +
+    `Connections:\n${connDesc}\n\n` +
+    `Return this exact JSON shape:\n` +
+    `{\n` +
+    `  "title": "one sentence system title",\n` +
+    `  "brief": "2-3 sentence plain English summary of what this system does",\n` +
+    `  "components": [\n` +
+    `    {"name":"exact label","type":"service|database|actor|gateway|queue|cache|other","role":"one line role"}\n` +
+    `  ],\n` +
+    `  "flow": [\n` +
+    `    {"step":1,"from":"component name","to":"component name","action":"what happens"}\n` +
+    `  ],\n` +
+    `  "insights": [\n` +
+    `    {"level":"info|warning|critical","text":"insight text"}\n` +
+    `  ]\n` +
+    `}\n\n` +
+    `Rules: components max 8, flow max 6 steps, insights exactly 2-3. Only valid JSON, nothing else.`;
+
+  try {
+    const messages = [
+      { role:"system", content:"You are a software architecture analyst. Respond only with valid JSON as instructed." },
+      { role:"user",   content: prompt },
+    ];
+    const req = buildRequest(provider, apiKey, messages);
+    req.body.messages = messages;
+    const res = await fetch(req.url, { method:"POST", headers:req.headers, body:JSON.stringify(req.body) });
+    if (!res.ok) { let d=`${res.status}`; try{const e=await res.json();if(e.error?.message)d+=` — ${e.error.message}`;}catch(_){} throw new Error(d); }
+    const data = await res.json();
+    const raw  = extractContent(data);
+
+    // Parse JSON — strip any accidental fences
+    const clean = raw.replace(/^```(?:json)?\s*/i,"").replace(/```\s*$/,"").trim();
+    const parsed = JSON.parse(clean);
+
+    // Get PNG URL for download
+    const pngUrl = await renderDiagramToPng(diagram).catch(()=>null);
+    liveSummaryCache = { data: parsed, pngUrl, provider };
+    renderSummaryCards(liveSummaryCache, diagram);
+  } catch(e) {
+    summaryWrap.innerHTML = `
+      <p style="color:var(--color-danger,#ff5a4e);font-size:13px;margin-bottom:8px">Error: ${escapeHtml(e.message)}</p>
+      <button class="adm-retry-btn" id="adm-vis-retry">↻ Retry</button>`;
+    document.getElementById("adm-vis-retry")?.addEventListener("click", () => generateVisualizeSummary(diagram));
+  }
+}
+
+const COMPONENT_COLORS = {
+  service:  { bg:"rgba(90,184,255,.15)",  border:"#5ab8ff", text:"#5ab8ff" },
+  database: { bg:"rgba(212,255,58,.12)",  border:"#d4ff3a", text:"#d4ff3a" },
+  actor:    { bg:"rgba(78,224,138,.12)",  border:"#4ee08a", text:"#4ee08a" },
+  gateway:  { bg:"rgba(201,143,255,.12)", border:"#c98fff", text:"#c98fff" },
+  queue:    { bg:"rgba(255,138,92,.12)",  border:"#ff8a5c", text:"#ff8a5c" },
+  cache:    { bg:"rgba(255,210,0,.12)",   border:"#ffd200", text:"#ffd200" },
+  other:    { bg:"rgba(255,255,255,.06)", border:"rgba(255,255,255,.25)", text:"var(--color-text-secondary)" },
+};
+const INSIGHT_COLORS = {
+  info:     { bg:"rgba(90,184,255,.12)",  border:"#5ab8ff", icon:"ℹ" },
+  warning:  { bg:"rgba(255,210,0,.12)",   border:"#ffd200", icon:"⚠" },
+  critical: { bg:"rgba(255,90,78,.12)",   border:"#ff5a4e", icon:"!" },
+};
+
+function renderSummaryCards(cache, diagram) {
+  const summaryWrap = document.getElementById("adm-vis-summary-wrap");
+  if (!summaryWrap) return;
+  const { data, provider } = cache;
+
+  // Show download buttons
+  document.getElementById("adm-vis-dl-text")?.style && (document.getElementById("adm-vis-dl-text").style.display="inline-block");
+  document.getElementById("adm-vis-dl-pdf")?.style  && (document.getElementById("adm-vis-dl-pdf").style.display="inline-block");
+
+  // Flow steps HTML
+  const flowHtml = (data.flow||[]).map((f,i) => `
+    <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px">
+      <div style="flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--color-accent);
+        color:var(--color-bg);font-size:10px;font-weight:bold;display:flex;align-items:center;justify-content:center">${f.step||i+1}</div>
+      <div style="font-size:12px;line-height:1.5;color:var(--color-text-secondary)">
+        <strong style="color:var(--color-text)">${escapeHtml(f.from||"")}</strong>
+        <span style="color:var(--color-accent);margin:0 4px">→</span>
+        <strong style="color:var(--color-text)">${escapeHtml(f.to||"")}</strong>
+        ${f.action ? `<span style="display:block;margin-top:1px;font-size:11px">${escapeHtml(f.action)}</span>` : ""}
+      </div>
+    </div>`).join("");
+
+  // Component chips HTML
+  const compHtml = (data.components||[]).map(c => {
+    const col = COMPONENT_COLORS[c.type] || COMPONENT_COLORS.other;
+    return `<div style="padding:6px 10px;border-radius:6px;border:1px solid ${col.border};
+      background:${col.bg};margin-bottom:6px">
+      <div style="font-size:11px;font-weight:bold;color:${col.text};margin-bottom:2px">${escapeHtml(c.name||"")}</div>
+      <div style="font-size:11px;color:var(--color-text-secondary)">${escapeHtml(c.role||"")}</div>
+    </div>`;
+  }).join("");
+
+  // Insight cards HTML
+  const insightHtml = (data.insights||[]).map(ins => {
+    const col = INSIGHT_COLORS[ins.level] || INSIGHT_COLORS.info;
+    return `<div style="padding:8px 12px;border-left:3px solid ${col.border};
+      background:${col.bg};border-radius:0 6px 6px 0;margin-bottom:8px;
+      font-size:12px;color:var(--color-text-secondary);line-height:1.5">
+      <span style="margin-right:6px;font-weight:bold">${col.icon}</span>${escapeHtml(ins.text||"")}
+    </div>`;
+  }).join("");
+
+  summaryWrap.innerHTML = `
+    <!-- Provider badge -->
+    <div style="font-size:10px;color:var(--color-accent);opacity:.7;margin-bottom:10px;font-family:var(--font-mono)">
+      Generated by ${escapeHtml(provider||"AI")}
+    </div>
+
+    <!-- Title + Brief -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:15px;font-family:var(--font-serif);color:var(--color-text);margin-bottom:6px">${escapeHtml(data.title||diagram.name||"")}</div>
+      <div style="font-size:13px;color:var(--color-text-secondary);line-height:1.6">${escapeHtml(data.brief||"")}</div>
+    </div>
+
+    <!-- Components -->
+    <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:6px">Components</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px">${compHtml}</div>
+
+    <!-- Flow -->
+    <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:8px">Flow</div>
+    <div style="margin-bottom:14px">${flowHtml}</div>
+
+    <!-- Insights -->
+    <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:8px">Key Insights</div>
+    <div>${insightHtml}</div>
+
+    <!-- Regenerate -->
+    <div style="margin-top:14px;text-align:right">
+      <button class="btn" id="adm-vis-regen" style="font-size:11px">↻ Regenerate</button>
+    </div>
+  `;
+
+  document.getElementById("adm-vis-regen")?.addEventListener("click", () => {
+    liveSummaryCache = null;
+    generateVisualizeSummary(diagram);
   });
+
+  // Wire download buttons
+  document.getElementById("adm-vis-dl-text")?.addEventListener("click", () => downloadSummaryText(cache, diagram));
+  document.getElementById("adm-vis-dl-pdf")?.addEventListener("click",  () => downloadSummaryPdf(cache, diagram));
+}
+
+function downloadSummaryText(cache, diagram) {
+  const d = cache.data;
+  const name = diagram.name || "Diagram";
+  let out = `${name} — Visualize Summary\n${"=".repeat(50)}\n`;
+  out += `Generated by ${cache.provider||"AI"} · ${new Date().toLocaleString()}\n\n`;
+  out += `TITLE\n${d.title||""}\n\n`;
+  out += `BRIEF\n${d.brief||""}\n\n`;
+  out += `COMPONENTS\n${(d.components||[]).map(c=>`  [${c.type}] ${c.name} — ${c.role}`).join("\n")}\n\n`;
+  out += `FLOW\n${(d.flow||[]).map(f=>`  ${f.step}. ${f.from} → ${f.to}: ${f.action}`).join("\n")}\n\n`;
+  out += `KEY INSIGHTS\n${(d.insights||[]).map(i=>`  [${i.level.toUpperCase()}] ${i.text}`).join("\n")}\n`;
+  const blob = new Blob([out],{type:"text/plain;charset=utf-8"});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a"); a.href=url; a.download=`${slugify(name)}-summary.txt`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+function downloadSummaryPdf(cache, diagram) {
+  const d = cache.data;
+  const name = diagram.name || "Diagram";
+
+  const compRows = (d.components||[]).map(c => {
+    const col = COMPONENT_COLORS[c.type] || COMPONENT_COLORS.other;
+    return `<div style="padding:6px 10px;border-radius:6px;border:1px solid ${col.border};
+      background:${col.bg};margin-bottom:6px">
+      <div style="font-size:11px;font-weight:bold;color:${col.text}">${escapeHtml(c.name)}</div>
+      <div style="font-size:11px;color:#666">${escapeHtml(c.role)}</div>
+    </div>`;
+  }).join("");
+
+  const flowRows = (d.flow||[]).map(f =>
+    `<div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start">
+      <div style="flex-shrink:0;width:20px;height:20px;border-radius:50%;background:#d4ff3a;
+        color:#000;font-size:10px;font-weight:bold;display:flex;align-items:center;justify-content:center">${f.step}</div>
+      <div style="font-size:12px"><strong>${escapeHtml(f.from)}</strong> → <strong>${escapeHtml(f.to)}</strong>
+        ${f.action?`<br><span style="color:#555;font-size:11px">${escapeHtml(f.action)}</span>`:""}
+      </div>
+    </div>`).join("");
+
+  const insightRows = (d.insights||[]).map(i => {
+    const col = INSIGHT_COLORS[i.level]||INSIGHT_COLORS.info;
+    return `<div style="padding:8px 12px;border-left:3px solid ${col.border};
+      background:${col.bg};border-radius:0 6px 6px 0;margin-bottom:8px;font-size:12px">${col.icon} ${escapeHtml(i.text)}</div>`;
+  }).join("");
+
+  const imgTag = cache.pngUrl
+    ? `<img src="${cache.pngUrl}" style="max-width:100%;border-radius:8px;border:1px solid #ddd;margin-bottom:20px"/>`
+    : "";
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
+<title>${escapeHtml(name)} — Summary</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a;max-width:900px;margin:0 auto;padding:32px 20px}
+  h1{font-size:22px;margin-bottom:4px}
+  .meta{font-size:11px;color:#999;margin-bottom:20px}
+  .brief{font-size:14px;color:#444;margin-bottom:24px;line-height:1.7;padding:12px;background:#f9f9f9;border-radius:6px}
+  .layout{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .section-title{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#999;margin-bottom:8px;font-weight:bold}
+  .hint{text-align:center;font-size:11px;color:#bbb;margin-top:32px}
+  @media print{.hint{display:none}body{padding:16px}}
+</style></head><body>
+<h1>${escapeHtml(d.title||name)}</h1>
+<div class="meta">ArchitectSmartCraft · ${new Date().toLocaleString()} · ${escapeHtml(cache.provider||"AI")}</div>
+${imgTag}
+<div class="brief">${escapeHtml(d.brief||"")}</div>
+<div class="layout">
+  <div>
+    <div class="section-title">Components</div>${compRows}
+    <div class="section-title" style="margin-top:16px">Key Insights</div>${insightRows}
+  </div>
+  <div>
+    <div class="section-title">Flow</div>${flowRows}
+  </div>
+</div>
+<div class="hint">Press Ctrl+P (or ⌘P) to save as PDF</div>
+</body></html>`;
+
+  const blob = new Blob([html],{type:"text/html;charset=utf-8"});
+  const url  = URL.createObjectURL(blob);
+  window.open(url,"_blank");
+  setTimeout(()=>URL.revokeObjectURL(url),10000);
 }
 
 function renderDiagramSvg(diagram) {
