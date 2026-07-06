@@ -138,6 +138,19 @@ function newState() {
 
 function theme() { return THEMES.find(t => t.key === S.theme) || THEMES[0]; }
 
+/** Fills in defaults for connector styling fields (color/width/opacity/radius) so
+ *  diagrams saved before these features existed still render correctly. */
+function normConn(c) {
+  return {
+    ...c,
+    wp: c.wp || [],
+    color: c.color != null ? c.color : null,
+    width: c.width != null ? c.width : 2,
+    opacity: c.opacity != null ? c.opacity : 100,
+    radius: c.radius != null ? c.radius : 0,
+  };
+}
+
 // ================================================================
 // ENTRY
 // ================================================================
@@ -387,6 +400,7 @@ function startFreeConnect(evt) {
       snap();
       const nc = {
         id: uid("c"), style: S.lineStyle, wp: [], startArrow: "none", endArrow: "filled",
+        color: null, width: 2, opacity: 100, radius: 0,
         from: startNode ? startNode.id : null,
         to: endNode ? endNode.id : null,
         fromPt: startNode ? null : { x: startPt.x, y: startPt.y },
@@ -779,7 +793,7 @@ function exportDiagram() {
     format: "ArchitectSmartCraft", version: "2.5",
     name: S.name, theme: S.theme,
     nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})=>({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})),
-    conns: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})=>({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})),
+    conns: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt,color,width,opacity,radius})=>({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt,color:color||null,width:width||2,opacity:opacity!=null?opacity:100,radius:radius||0})),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -812,7 +826,7 @@ async function importFromJson(file) {
     snap();
     S.name = data.name || "Imported";
     S.nodes = data.nodes || [];
-    S.conns = (data.conns || []).map(c => ({ ...c, wp: c.wp || [] }));
+    S.conns = (data.conns || []).map(normConn);
     if (data.theme && THEMES.find(t => t.key === data.theme)) S.theme = data.theme;
     el.name.value = S.name;
     applyTheme(); draw(); fitView(); buildToolbar();
@@ -849,7 +863,7 @@ async function importFromImage(file) {
     (dj.connectors || []).forEach(c => {
       const fromId = idMap[c.from]||idMap[c.from_label];
       const toId = idMap[c.to]||idMap[c.to_label];
-      if (fromId && toId) S.conns.push({ id: uid("c"), from: fromId, to: toId, style: c.style||"straight", wp: [], startArrow:"none", endArrow:"filled" });
+      if (fromId && toId) S.conns.push({ id: uid("c"), from: fromId, to: toId, style: c.style||"straight", wp: [], startArrow:"none", endArrow:"filled", color:null, width:2, opacity:100, radius:0 });
     });
     draw(); fitView(); buildToolbar();
     toast(`Converted: ${S.nodes.length} shapes, ${S.conns.length} connections`);
@@ -1376,7 +1390,7 @@ function drawConn(conn) {
   const connStyle = conn.style || "straight";
   const lsDef = LINE_STYLES.find(ls => ls.key === connStyle);
   const pathStyle = lsDef && lsDef.base ? lsDef.base : connStyle;
-  const d  = buildPath(p1, p2, pathStyle, wp);
+  const d  = buildPath(p1, p2, pathStyle, wp, conn.radius || 0);
   const isSel = S.sel && S.sel.k === "conn" && S.sel.id === conn.id;
 
   const g = svgEl("g");
@@ -1389,17 +1403,27 @@ function drawConn(conn) {
   hit.addEventListener("click", e => { e.stopPropagation(); setSel({k:"conn",id:conn.id}); });
   g.appendChild(hit);
 
-  // visible line
+  // visible line — custom color/thickness/opacity (Miro-style connector styling), falls
+  // back to theme defaults when not set on the connector
+  const baseWidth = conn.width || 2;
   const line = svgEl("path");
   line.setAttribute("d", d); line.setAttribute("fill", "none");
-  line.setAttribute("stroke", isSel ? theme().sel : theme().stroke);
-  line.setAttribute("stroke-width", isSel ? "2.5" : "1.5");
+  line.setAttribute("stroke", conn.color || (isSel ? theme().sel : theme().stroke));
+  line.setAttribute("stroke-width", String(isSel ? baseWidth + 1 : baseWidth));
+  line.setAttribute("opacity", String((conn.opacity != null ? conn.opacity : 100) / 100));
   if (lsDef && lsDef.dash) line.setAttribute("stroke-dasharray", lsDef.dash);
   const endArrow = conn.endArrow || "filled";
   const startArrow = conn.startArrow || "none";
-  const suffix = isSel ? "-w" : "";
-  if (endArrow !== "none") line.setAttribute("marker-end", `url(#ah-${endArrow}${suffix})`);
-  if (startArrow !== "none") line.setAttribute("marker-start", `url(#ah-s-${startArrow})`);
+  if (conn.color) {
+    // Custom stroke color: generate a matching-color marker on the fly so the
+    // arrowhead doesn't stay lime/white while the line itself is recolored.
+    if (endArrow !== "none") line.setAttribute("marker-end", `url(#${ensureColorMarker(endArrow, conn.color, false)})`);
+    if (startArrow !== "none") line.setAttribute("marker-start", `url(#${ensureColorMarker(startArrow, conn.color, true)})`);
+  } else {
+    const suffix = isSel ? "-w" : "";
+    if (endArrow !== "none") line.setAttribute("marker-end", `url(#ah-${endArrow}${suffix})`);
+    if (startArrow !== "none") line.setAttribute("marker-start", `url(#ah-s-${startArrow})`);
+  }
   line.style.pointerEvents = "none";
   g.appendChild(line);
 
@@ -1471,6 +1495,7 @@ function showConnFloat(p1, p2, conn) {
   const curStyle = conn.style || "straight";
   const curEnd = conn.endArrow || "filled";
   const curStart = conn.startArrow || "none";
+  const curColor = conn.color || t.stroke;
 
   el.connBar.classList.remove("hidden");
   el.connBar.innerHTML = `
@@ -1491,6 +1516,13 @@ function showConnFloat(p1, p2, conn) {
       `<button class="btn${curEnd===at.key?" btn-primary":""}" data-fea="${at.key}" style="padding:2px 4px;border:none;line-height:0" title="${at.label}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`
     ).join("")}
+    <div style="width:1px;height:18px;background:${t.border};margin:0 4px"></div>
+    <button class="btn" id="dd-conn-color-btn" title="Line color" style="padding:2px 4px;border:none;line-height:0;display:flex;align-items:center">
+      <span style="width:14px;height:14px;border-radius:50%;display:inline-block;border:1px solid ${t.border};background:${curColor}"></span>
+    </button>
+    <button class="btn" id="dd-conn-more-btn" title="More line options" style="padding:2px 6px;border:none;line-height:0">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+    </button>
   `;
 
   el.connBar.querySelectorAll("[data-fls]").forEach(b => b.addEventListener("click", e => {
@@ -1502,6 +1534,139 @@ function showConnFloat(p1, p2, conn) {
   el.connBar.querySelectorAll("[data-fea]").forEach(b => b.addEventListener("click", e => {
     e.stopPropagation(); snap(); conn.endArrow = b.dataset.fea; draw();
   }));
+  document.getElementById("dd-conn-color-btn").addEventListener("click", e => {
+    e.stopPropagation(); openConnColorPopup(conn, e.currentTarget);
+  });
+  document.getElementById("dd-conn-more-btn").addEventListener("click", e => {
+    e.stopPropagation(); openConnStylePopup(conn, e.currentTarget);
+  });
+}
+
+/** Small popup anchored under the connBar color swatch — pick a stroke color for
+ *  the selected connector (defaults back to the theme's stroke color when cleared). */
+function openConnColorPopup(conn, anchorBtn) {
+  const old = document.getElementById("dd-connclr-popup");
+  if (old) { old.remove(); return; }
+  const wrap = document.getElementById("dd-canvas-wrap");
+  const t = theme();
+  const popup = document.createElement("div");
+  popup.id = "dd-connclr-popup";
+  popup.style.cssText = `
+    position:absolute; z-index:8; background:${t.bg==="#ffffff"||t.bg==="#f8f8f8"?"var(--color-bg-raised)":t.bg};
+    border:1px solid var(--color-border-strong); border-radius:var(--radius-md); padding:6px;
+    display:flex; gap:4px; flex-wrap:wrap; max-width:170px;`;
+  const barRect = el.connBar.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  popup.style.left = (anchorBtn.getBoundingClientRect().left - wrapRect.left) + "px";
+  popup.style.top  = (barRect.bottom - wrapRect.top + 4) + "px";
+
+  popup.innerHTML = STROKE_COLORS.map(c => `
+    <button data-cclr="${c.key}" title="${c.label}" style="width:20px;height:20px;border-radius:50%;border:1.5px solid ${(conn.color||"")===c.key?t.sel:"rgba(0,0,0,0.15)"};
+      background:${c.hex || t.stroke};cursor:pointer;padding:0"></button>
+  `).join("");
+  popup.querySelectorAll("[data-cclr]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); snap();
+    conn.color = b.dataset.cclr || null;
+    draw(); popup.remove();
+    document.removeEventListener("click", closeOnOutside);
+  }));
+  wrap.appendChild(popup);
+  const closeOnOutside = e => { if (!popup.contains(e.target) && e.target !== anchorBtn) { popup.remove(); document.removeEventListener("click", closeOnOutside); } };
+  setTimeout(() => document.addEventListener("click", closeOnOutside), 0);
+}
+
+/** Miro-style expanded connector panel: thickness / opacity / rounded-corner sliders
+ *  plus a brand-colors row, anchored below the "more options" (⋮) button. */
+function openConnStylePopup(conn, anchorBtn) {
+  const old = document.getElementById("dd-connstyle-popup");
+  if (old) { old.remove(); return; }
+  snap(); // group any slider tweaks made in this session into one undo step
+
+  const wrap = document.getElementById("dd-canvas-wrap");
+  const t = theme();
+  const popup = document.createElement("div");
+  popup.id = "dd-connstyle-popup";
+  popup.style.cssText = `
+    position:absolute; z-index:8; width:220px; background:var(--color-bg-raised);
+    border:1px solid var(--color-border-strong); border-radius:var(--radius-md); padding:14px;
+    display:flex; flex-direction:column; gap:10px; font-size:12px; color:${t.text};`;
+  const barRect = el.connBar.getBoundingClientRect();
+  const wrapRect = wrap.getBoundingClientRect();
+  let left = anchorBtn.getBoundingClientRect().left - wrapRect.left - 190;
+  if (left < 4) left = 4;
+  popup.style.left = left + "px";
+  popup.style.top  = (barRect.bottom - wrapRect.top + 4) + "px";
+
+  const width = conn.width || 2;
+  const opacity = conn.opacity != null ? conn.opacity : 100;
+  const radius = conn.radius || 0;
+
+  popup.innerHTML = `
+    <div>
+      <div style="display:flex;justify-content:space-between;opacity:0.7;margin-bottom:4px">
+        <span>Thickness</span><span id="dd-cs-w-val">${width}</span>
+      </div>
+      <input id="dd-cs-width" type="range" min="1" max="12" step="1" value="${width}" style="width:100%">
+    </div>
+    <div>
+      <div style="display:flex;justify-content:space-between;opacity:0.7;margin-bottom:4px">
+        <span>Opacity</span><span id="dd-cs-o-val">${opacity}%</span>
+      </div>
+      <input id="dd-cs-opacity" type="range" min="10" max="100" step="5" value="${opacity}" style="width:100%">
+    </div>
+    <div>
+      <div style="display:flex;justify-content:space-between;opacity:0.7;margin-bottom:4px">
+        <span>Rounded corners</span><span id="dd-cs-r-val">${radius}</span>
+      </div>
+      <input id="dd-cs-radius" type="range" min="0" max="40" step="2" value="${radius}" style="width:100%">
+      <div style="opacity:0.55;font-size:10px;margin-top:3px">Applies to right-angle (elbow) lines</div>
+    </div>
+    <div>
+      <div style="opacity:0.7;margin-bottom:4px">Colors</div>
+      <div id="dd-cs-colors" style="display:flex;gap:5px;flex-wrap:wrap">
+        ${STROKE_COLORS.map(c => `
+          <button data-cscol="${c.key}" title="${c.label}" style="width:18px;height:18px;border-radius:50%;cursor:pointer;padding:0;
+            border:1.5px solid ${(conn.color||"")===c.key?t.sel:"rgba(0,0,0,0.15)"};background:${c.hex || t.stroke}"></button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  popup.querySelector("#dd-cs-width").addEventListener("input", e => {
+    conn.width = parseInt(e.target.value, 10);
+    popup.querySelector("#dd-cs-w-val").textContent = conn.width;
+    draw();
+  });
+  popup.querySelector("#dd-cs-opacity").addEventListener("input", e => {
+    conn.opacity = parseInt(e.target.value, 10);
+    popup.querySelector("#dd-cs-o-val").textContent = conn.opacity + "%";
+    draw();
+  });
+  popup.querySelector("#dd-cs-radius").addEventListener("input", e => {
+    conn.radius = parseInt(e.target.value, 10);
+    popup.querySelector("#dd-cs-r-val").textContent = conn.radius;
+    draw();
+  });
+  popup.querySelectorAll("[data-cscol]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    conn.color = b.dataset.cscol || null;
+    draw();
+    popup.querySelectorAll("[data-cscol]").forEach(x => x.style.border = `1.5px solid ${x.dataset.cscol===(conn.color||"")?t.sel:"rgba(0,0,0,0.15)"}`);
+  }));
+
+  // Keep interactions inside the popup from bubbling to the canvas (which would
+  // deselect the connector and close the bar).
+  popup.addEventListener("click", e => e.stopPropagation());
+  popup.addEventListener("mousedown", e => e.stopPropagation());
+  popup.addEventListener("touchstart", e => e.stopPropagation(), { passive: true });
+
+  wrap.appendChild(popup);
+  const closeOnOutside = e => {
+    if (!popup.contains(e.target) && e.target !== anchorBtn) {
+      popup.remove(); buildToolbar(); document.removeEventListener("click", closeOnOutside);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", closeOnOutside), 0);
 }
 
 // ================================================================
@@ -1603,7 +1768,7 @@ function startConnect(fromId, evt) {
     tmp.remove();
     if (target) {
       snap();
-      const nc = {id:uid("c"), from:fromId, to:target.id, style:S.lineStyle, wp:[], startArrow:"none", endArrow:"filled"};
+      const nc = {id:uid("c"), from:fromId, to:target.id, style:S.lineStyle, wp:[], startArrow:"none", endArrow:"filled", color:null, width:2, opacity:100, radius:0};
       S.conns.push(nc);
       setSel({k:"conn", id:nc.id});
     }
@@ -1779,7 +1944,7 @@ function buildShape(node) {
 // CONNECTOR PATH
 // ================================================================
 
-function buildPath(p1, p2, style, wp) {
+function buildPath(p1, p2, style, wp, radius) {
   const pts = [p1, ...(wp||[]), p2];
   if (style === "curved") {
     let d = `M${pts[0].x} ${pts[0].y}`;
@@ -1787,11 +1952,40 @@ function buildPath(p1, p2, style, wp) {
     return d;
   }
   if (style === "orthogonal") {
-    let d = `M${pts[0].x} ${pts[0].y}`;
-    for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1],mx=a.x+(b.x-a.x)/2; d+=` L${mx} ${a.y}L${mx} ${b.y}L${b.x} ${b.y}`;}
-    return d;
+    const corners = [pts[0]];
+    for(let i=0;i<pts.length-1;i++){
+      const a=pts[i],b=pts[i+1],mx=a.x+(b.x-a.x)/2;
+      corners.push({x:mx,y:a.y}, {x:mx,y:b.y}, b);
+    }
+    return roundedPath(corners, radius || 0);
   }
   return `M${pts[0].x} ${pts[0].y} `+pts.slice(1).map(p=>`L${p.x} ${p.y}`).join(" ");
+}
+
+/** Builds a polyline path with rounded (arc-style) interior corners — used to give
+ *  orthogonal/right-angle connectors Miro-style adjustable corner radii. Falls back
+ *  to plain straight segments when radius is 0. */
+function roundedPath(rawPoints, radius) {
+  // Drop consecutive duplicate points (common when a segment has zero length)
+  const points = rawPoints.filter((p, i) => i === 0 || Math.hypot(p.x-rawPoints[i-1].x, p.y-rawPoints[i-1].y) > 0.5);
+  if (!points.length) return "";
+  if (!radius || points.length < 3) {
+    return `M${points[0].x} ${points[0].y} ` + points.slice(1).map(p=>`L${p.x} ${p.y}`).join(" ");
+  }
+  let d = `M${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const prev = points[i-1], cur = points[i], next = points[i+1];
+    const d1 = Math.hypot(cur.x-prev.x, cur.y-prev.y);
+    const d2 = Math.hypot(next.x-cur.x, next.y-cur.y);
+    const r = Math.min(radius, d1/2, d2/2);
+    if (r <= 0.5) { d += ` L${cur.x} ${cur.y}`; continue; }
+    const inX = cur.x + (prev.x-cur.x)/d1*r, inY = cur.y + (prev.y-cur.y)/d1*r;
+    const outX = cur.x + (next.x-cur.x)/d2*r, outY = cur.y + (next.y-cur.y)/d2*r;
+    d += ` L${inX} ${inY} Q${cur.x} ${cur.y} ${outX} ${outY}`;
+  }
+  const last = points[points.length-1];
+  d += ` L${last.x} ${last.y}`;
+  return d;
 }
 
 // ================================================================
@@ -1819,6 +2013,29 @@ async function downloadPng() {
   svg += `<marker id="es-diamond" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto-start-reverse"><polygon points="0,5 5,0 10,5 5,10" fill="${t.stroke}"/></marker>`;
   svg += `<marker id="es-circle" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse"><circle cx="4" cy="4" r="3" fill="${t.stroke}"/></marker>`;
   svg += `</defs>`;
+
+  // Custom-colored connectors need their own arrowhead markers so exported PNGs
+  // match what's shown on the canvas instead of falling back to the theme color.
+  let extraMarkers = "";
+  const seenMarkerIds = new Set();
+  function exportMarkerId(arrowType, color, isStart) {
+    const safeColor = color.replace(/[^a-zA-Z0-9]/g, "");
+    const id = `ea-c-${safeColor}-${isStart ? "s-" : ""}${arrowType}`;
+    if (!seenMarkerIds.has(id)) {
+      seenMarkerIds.add(id);
+      const orient = isStart ? "auto-start-reverse" : "auto";
+      if (arrowType === "arrow") {
+        extraMarkers += `<marker id="${id}" markerWidth="9" markerHeight="9" refX="${isStart?2:7}" refY="4.5" orient="${orient}">${isStart?`<path d="M9 0L0 4.5L9 9" fill="none" stroke="${color}" stroke-width="1.5"/>`:`<path d="M0 0L9 4.5L0 9" fill="none" stroke="${color}" stroke-width="1.5"/>`}</marker>`;
+      } else if (arrowType === "diamond") {
+        extraMarkers += `<marker id="${id}" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="${orient}"><polygon points="0,5 5,0 10,5 5,10" fill="${color}"/></marker>`;
+      } else if (arrowType === "circle") {
+        extraMarkers += `<marker id="${id}" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="${orient}"><circle cx="4" cy="4" r="3" fill="${color}"/></marker>`;
+      } else {
+        extraMarkers += `<marker id="${id}" markerWidth="9" markerHeight="9" refX="${isStart?2:7}" refY="4.5" orient="${orient}">${isStart?`<polygon points="9 0,0 4.5,9 9" fill="${color}"/>`:`<polygon points="0 0,9 4.5,0 9" fill="${color}"/>`}</marker>`;
+      }
+    }
+    return id;
+  }
   svg += `<g transform="translate(${ox},${oy})">`;
 
   S.conns.forEach(c => {
@@ -1833,14 +2050,22 @@ async function downloadPng() {
     let markers = "";
     const endA = c.endArrow || "filled";
     const startA = c.startArrow || "none";
-    if (endA === "filled") markers += ` marker-end="url(#ea)"`;
-    else if (endA !== "none") markers += ` marker-end="url(#ea-${endA})"`;
-    if (startA !== "none") markers += ` marker-start="url(#es-${startA})"`;
+    if (c.color) {
+      if (endA !== "none") markers += ` marker-end="url(#${exportMarkerId(endA, c.color, false)})"`;
+      if (startA !== "none") markers += ` marker-start="url(#${exportMarkerId(startA, c.color, true)})"`;
+    } else {
+      if (endA === "filled") markers += ` marker-end="url(#ea)"`;
+      else if (endA !== "none") markers += ` marker-end="url(#ea-${endA})"`;
+      if (startA !== "none") markers += ` marker-start="url(#es-${startA})"`;
+    }
     const cStyle = c.style || "straight";
     const cLsDef = LINE_STYLES.find(ls => ls.key === cStyle);
     const cPathStyle = cLsDef && cLsDef.base ? cLsDef.base : cStyle;
     const dashAttr = cLsDef && cLsDef.dash ? ` stroke-dasharray="${cLsDef.dash}"` : "";
-    svg += `<path d="${buildPath(p1,p2,cPathStyle,wp)}" fill="none" stroke="${t.stroke}" stroke-width="1.5"${markers}${dashAttr}/>`;
+    const cColor = c.color || t.stroke;
+    const cWidth = c.width || 2;
+    const cOpacity = (c.opacity != null ? c.opacity : 100) / 100;
+    svg += `<path d="${buildPath(p1,p2,cPathStyle,wp,c.radius||0)}" fill="none" stroke="${cColor}" stroke-width="${cWidth}" opacity="${cOpacity}"${markers}${dashAttr}/>`;
   });
 
   S.nodes.forEach(n => {
@@ -1855,7 +2080,9 @@ async function downloadPng() {
     if (rot) svg += `</g>`;
   });
 
-  svg += "</g></svg>";
+  svg += "</g>";
+  if (extraMarkers) svg += `<defs>${extraMarkers}</defs>`;
+  svg += "</svg>";
 
   try {
     const url = await svg2png(svg, w, h);
@@ -1930,7 +2157,7 @@ async function save() {
   const saved = await storage.diagrams.save({
     id: S.id, name: S.name,
     nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null,imageData:imageData||null})),
-    connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled",fromPt:fromPt||null,toPt:toPt||null})),
+    connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt,color,width,opacity,radius})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled",fromPt:fromPt||null,toPt:toPt||null,color:color||null,width:width||2,opacity:opacity!=null?opacity:100,radius:radius||0})),
   });
   S.id = saved.id;
   toast("Saved"); loadSavedList();
@@ -1960,7 +2187,7 @@ async function loadDiagram(id) {
   S = newState();
   S.id = d.id; S.name = d.name;
   S.nodes = d.nodes || [];
-  S.conns = (d.connectors || []).map(c => ({...c, wp: c.wp || []}));
+  S.conns = (d.connectors || []).map(normConn);
   el.name.value = S.name;
   draw(); fitView(); buildToolbar(); loadSavedList();
 }
@@ -1974,6 +2201,43 @@ function esc(s) { const d=document.createElement("div"); d.textContent=s; return
 function escXml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
 function svgEl(tag) { return document.createElementNS("http://www.w3.org/2000/svg", tag); }
+
+/** Lazily creates (and caches) an arrowhead marker matching a custom connector color,
+ *  appending it to the canvas <defs> the first time it's needed. Returns the marker id. */
+const _colorMarkerCache = new Set();
+function ensureColorMarker(arrowType, color, isStart) {
+  const safeColor = color.replace(/[^a-zA-Z0-9]/g, "");
+  const id = `ah-c-${safeColor}-${isStart ? "s-" : ""}${arrowType}`;
+  if (_colorMarkerCache.has(id)) return id;
+  const defs = el.svg.querySelector("defs");
+  const orient = isStart ? "auto-start-reverse" : "auto";
+  const marker = svgEl("marker");
+  marker.setAttribute("id", id);
+  marker.setAttribute("markerWidth", arrowType === "diamond" || arrowType === "circle" ? "10" : "9");
+  marker.setAttribute("markerHeight", arrowType === "diamond" || arrowType === "circle" ? "10" : "9");
+  marker.setAttribute("orient", orient);
+  let inner;
+  if (arrowType === "arrow") {
+    marker.setAttribute("refX", isStart ? "2" : "7"); marker.setAttribute("refY", "4.5");
+    inner = isStart
+      ? `<path d="M9 0L0 4.5L9 9" fill="none" stroke="${color}" stroke-width="1.5"/>`
+      : `<path d="M0 0L9 4.5L0 9" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+  } else if (arrowType === "diamond") {
+    marker.setAttribute("refX", "5"); marker.setAttribute("refY", "5");
+    inner = `<polygon points="0,5 5,0 10,5 5,10" fill="${color}"/>`;
+  } else if (arrowType === "circle") {
+    marker.setAttribute("refX", "4"); marker.setAttribute("refY", "4");
+    inner = `<circle cx="4" cy="4" r="3" fill="${color}"/>`;
+  } else {
+    // filled (default)
+    marker.setAttribute("refX", isStart ? "2" : "7"); marker.setAttribute("refY", "4.5");
+    inner = isStart ? `<polygon points="9 0,0 4.5,9 9" fill="${color}"/>` : `<polygon points="0 0,9 4.5,0 9" fill="${color}"/>`;
+  }
+  marker.innerHTML = inner;
+  defs.appendChild(marker);
+  _colorMarkerCache.add(id);
+  return id;
+}
 function mkEl(tag,attrs) { const e=svgEl(tag); for(const[k,v]of Object.entries(attrs)) e.setAttribute(k,v); return e; }
 function ptr(e) { const p=e.touches?e.touches[0]:e; return {x:p.clientX,y:p.clientY}; }
 function svgPt(e) { const r=el.svg.getBoundingClientRect(); const p=e.touches?e.touches[0]:e; return {x:(p.clientX-r.left-S.pan.x)/S.zoom, y:(p.clientY-r.top-S.pan.y)/S.zoom}; }
