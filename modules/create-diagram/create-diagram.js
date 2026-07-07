@@ -130,6 +130,7 @@ function newState() {
     undo: [], redo: [], activeWp: null,
     tool: null,           // null | "text" | "connect"
     lineStyle: "straight", // default for new connectors
+    connDefaults: { color: null, width: 2, opacity: 100, radius: 0, startArrow: "none", endArrow: "filled" },
     pendingColor: null,
     theme: "dark",         // canvas theme key
     exportBorder: true,    // draw a border frame around downloaded PNG
@@ -281,6 +282,7 @@ const TB = {
   exprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 3v12"/><path d="M16 7l-4-4-4 4"/>`,
   imprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 15V3"/><path d="M8 11l4 4 4-4"/>`,
   newDoc:  `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="9" y1="15" x2="15" y2="15"/>`,
+  lineUp:  `<line x1="5" y1="6" x2="19" y2="6"/><circle cx="10" cy="6" r="2" fill="currentColor"/><line x1="5" y1="12" x2="19" y2="12"/><circle cx="15" cy="12" r="2" fill="currentColor"/><line x1="5" y1="18" x2="19" y2="18"/><circle cx="8" cy="18" r="2" fill="currentColor"/>`,
 };
 
 function buildToolbar() {
@@ -297,6 +299,7 @@ function buildToolbar() {
     tbBtn("tb-re", TB.redo, "Redo",  S.redo.length===0),
     tbSep(),
     tbBtn("tb-cn", TB.conn,  "Connector tool", false, S.tool==="connect"),
+    tbBtn("tb-lu", TB.lineUp,"Line-Up: line style, thickness, opacity, corners"),
     tbBtn("tb-br", TB.brush, "Fill color"),
     tbBtn("tb-tx", TB.text,  "Text tool", false, S.tool==="text"),
     tbBtn("tb-th", TB.theme, "Canvas theme"),
@@ -318,6 +321,7 @@ function buildToolbar() {
   on("tb-un",  undo);
   on("tb-re",  redo);
   on("tb-cn",  openConnPopup);
+  on("tb-lu",  openLineUpPopup);
   on("tb-br",  openColorPopup);
   on("tb-tx",  toggleTextTool);
   on("tb-th",  openThemePopup);
@@ -399,8 +403,9 @@ function startFreeConnect(evt) {
       const endNode = nodeAt(endPt);
       snap();
       const nc = {
-        id: uid("c"), style: S.lineStyle, wp: [], startArrow: "none", endArrow: "filled",
-        color: null, width: 2, opacity: 100, radius: 0,
+        id: uid("c"), style: S.lineStyle, wp: [],
+        startArrow: S.connDefaults.startArrow, endArrow: S.connDefaults.endArrow,
+        color: S.connDefaults.color, width: S.connDefaults.width, opacity: S.connDefaults.opacity, radius: S.connDefaults.radius,
         from: startNode ? startNode.id : null,
         to: endNode ? endNode.id : null,
         fromPt: startNode ? null : { x: startPt.x, y: startPt.y },
@@ -624,6 +629,123 @@ function openColorPopup() {
     else S.pendingColor = color || null;
     closePopup();
   }));
+}
+
+// ================================================================
+// LINE-UP — single toolbar entry point for ALL line styling controls
+// (type, arrows, color, thickness, opacity, rounded corners). Edits the
+// selected connector directly if one is selected; otherwise sets the
+// defaults new connectors will be drawn with (Miro's "preset" behavior).
+// ================================================================
+
+function openLineUpPopup() {
+  if (!el.popup.classList.contains("hidden") && el.popup.dataset.mode === "lineup") { closePopup(); return; }
+  el.popup.dataset.mode = "lineup";
+  el.popup.style.left = document.getElementById("tb-lu").offsetLeft + "px";
+  el.popup.classList.remove("hidden");
+  const selConn = (S.sel && S.sel.k === "conn") ? S.conns.find(c => c.id === S.sel.id) : null;
+  if (selConn) snap(); // group every tweak made in this popup session into one undo step
+  renderLineUpPopup();
+}
+
+function renderLineUpPopup() {
+  const t = theme();
+  const selConn = (S.sel && S.sel.k === "conn") ? S.conns.find(c => c.id === S.sel.id) : null;
+  const editingSelected = !!selConn;
+  const target = editingSelected ? selConn : S.connDefaults;
+  const style = editingSelected ? (selConn.style || "straight") : S.lineStyle;
+  const startA = target.startArrow || "none";
+  const endA = target.endArrow || "filled";
+  const color = target.color || "";
+  const width = target.width || 2;
+  const opacity = target.opacity != null ? target.opacity : 100;
+  const radius = target.radius || 0;
+
+  el.popup.innerHTML = `
+    <div style="width:230px;display:flex;flex-direction:column;gap:10px;font-size:11px">
+      <div style="opacity:0.6">${editingSelected ? "Styling selected line" : "Default style for new lines"}</div>
+      <div>
+        <div style="opacity:0.7;margin-bottom:4px">Line type</div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px">${LINE_STYLES.map(ls => `
+          <button class="btn${style===ls.key?" btn-primary":""}" data-lu-style="${ls.key}" style="padding:4px 6px;border:none;line-height:0" title="${ls.label}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">${ls.icon}</svg></button>`).join("")}
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <div style="flex:1">
+          <div style="opacity:0.7;margin-bottom:4px">Start</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px">${ARROW_TYPES.map(at => `
+            <button class="btn${startA===at.key?" btn-primary":""}" data-lu-start="${at.key}" style="padding:3px 4px;border:none;line-height:0" title="${at.label}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`).join("")}
+          </div>
+        </div>
+        <div style="flex:1">
+          <div style="opacity:0.7;margin-bottom:4px">End</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px">${ARROW_TYPES.map(at => `
+            <button class="btn${endA===at.key?" btn-primary":""}" data-lu-end="${at.key}" style="padding:3px 4px;border:none;line-height:0" title="${at.label}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">${at.icon}</svg></button>`).join("")}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;opacity:0.7;margin-bottom:4px"><span>Thickness</span><span id="dd-lu-w-val">${width}</span></div>
+        <input id="dd-lu-width" type="range" min="1" max="12" step="1" value="${width}" style="width:100%">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;opacity:0.7;margin-bottom:4px"><span>Opacity</span><span id="dd-lu-o-val">${opacity}%</span></div>
+        <input id="dd-lu-opacity" type="range" min="10" max="100" step="5" value="${opacity}" style="width:100%">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;opacity:0.7;margin-bottom:4px"><span>Rounded corners</span><span id="dd-lu-r-val">${radius}</span></div>
+        <input id="dd-lu-radius" type="range" min="0" max="40" step="2" value="${radius}" style="width:100%">
+        <div style="opacity:0.5;font-size:10px;margin-top:2px">Applies to right-angle lines</div>
+      </div>
+      <div>
+        <div style="opacity:0.7;margin-bottom:4px">Color</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">${STROKE_COLORS.map(c => `
+          <button data-lu-color="${c.key}" title="${c.label}" style="width:18px;height:18px;border-radius:50%;cursor:pointer;padding:0;
+            border:1.5px solid ${color===c.key?t.sel:"rgba(0,0,0,0.2)"};background:${c.hex || t.stroke}"></button>`).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+
+  el.popup.querySelectorAll("[data-lu-style]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    if (editingSelected) selConn.style = b.dataset.luStyle; else S.lineStyle = b.dataset.luStyle;
+    if (editingSelected) draw();
+    renderLineUpPopup();
+  }));
+  el.popup.querySelectorAll("[data-lu-start]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); target.startArrow = b.dataset.luStart;
+    if (editingSelected) draw();
+    renderLineUpPopup();
+  }));
+  el.popup.querySelectorAll("[data-lu-end]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); target.endArrow = b.dataset.luEnd;
+    if (editingSelected) draw();
+    renderLineUpPopup();
+  }));
+  el.popup.querySelectorAll("[data-lu-color]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); target.color = b.dataset.luColor || null;
+    if (editingSelected) draw();
+    renderLineUpPopup();
+  }));
+  document.getElementById("dd-lu-width").addEventListener("input", e => {
+    target.width = parseInt(e.target.value, 10);
+    document.getElementById("dd-lu-w-val").textContent = target.width;
+    if (editingSelected) draw();
+  });
+  document.getElementById("dd-lu-opacity").addEventListener("input", e => {
+    target.opacity = parseInt(e.target.value, 10);
+    document.getElementById("dd-lu-o-val").textContent = target.opacity + "%";
+    if (editingSelected) draw();
+  });
+  document.getElementById("dd-lu-radius").addEventListener("input", e => {
+    target.radius = parseInt(e.target.value, 10);
+    document.getElementById("dd-lu-r-val").textContent = target.radius;
+    if (editingSelected) draw();
+  });
 }
 
 // ================================================================
@@ -975,6 +1097,32 @@ function drawNode(node) {
   shape.style.pointerEvents = "none";
   g.appendChild(shape);
 
+  // ── Hover-to-connect dots (Miro-style): appear on mouseover of ANY box, even
+  // unselected, so dragging box-to-box connectors doesn't require picking the
+  // connector tool first. Stay fully visible while the node is selected too.
+  {
+    const t3 = theme();
+    const hoverDots = [];
+    handles(node).forEach(h => {
+      const cdot = svgEl("circle");
+      cdot.setAttribute("cx", h.x); cdot.setAttribute("cy", h.y);
+      cdot.setAttribute("r", 5);
+      cdot.setAttribute("fill", t3.sel); cdot.setAttribute("stroke", "#fff"); cdot.setAttribute("stroke-width", "1.5");
+      cdot.style.cursor = "crosshair";
+      cdot.style.transition = "opacity 0.12s";
+      cdot.style.opacity = isSel ? "0.85" : "0";
+      cdot.style.pointerEvents = isSel ? "auto" : "none";
+      cdot.addEventListener("mousedown", e => { e.stopPropagation(); startConnect(node.id, e); });
+      cdot.addEventListener("touchstart", e => { e.stopPropagation(); startConnect(node.id, e); }, { passive: true });
+      g.appendChild(cdot);
+      hoverDots.push(cdot);
+    });
+    if (!isSel) {
+      g.addEventListener("mouseenter", () => hoverDots.forEach(d => { d.style.opacity = "0.85"; d.style.pointerEvents = "auto"; }));
+      g.addEventListener("mouseleave", () => hoverDots.forEach(d => { d.style.opacity = "0"; d.style.pointerEvents = "none"; }));
+    }
+  }
+
   // label (skip for image nodes or show below)
   if (node.type !== "image") {
     const txt = svgEl("text");
@@ -1098,17 +1246,8 @@ function drawNode(node) {
       g.appendChild(dot);
     });
 
-    // ── Edge connector dots (separate crosshair dots on 4 midpoints for connect tool) ──
-    handles(node).forEach(h => {
-      const cdot = svgEl("circle");
-      cdot.setAttribute("cx", h.x); cdot.setAttribute("cy", h.y);
-      cdot.setAttribute("r", 4);
-      cdot.setAttribute("fill", t2.sel); cdot.setAttribute("stroke", "#fff"); cdot.setAttribute("stroke-width", "1");
-      cdot.style.cursor = "crosshair"; cdot.style.opacity = "0.7";
-      cdot.addEventListener("mousedown", e => { e.stopPropagation(); startConnect(node.id, e); });
-      cdot.addEventListener("touchstart", e => { e.stopPropagation(); startConnect(node.id, e); }, {passive:true});
-      g.appendChild(cdot);
-    });
+    // ── (rotate handle + resize handles moved here — connector dots are now
+    //    hover-activated below so boxes can be connected without selecting first) ──
 
     // show text formatting float only for text nodes
     if (node.type === "text") showTextFloat(node);
@@ -1768,7 +1907,9 @@ function startConnect(fromId, evt) {
     tmp.remove();
     if (target) {
       snap();
-      const nc = {id:uid("c"), from:fromId, to:target.id, style:S.lineStyle, wp:[], startArrow:"none", endArrow:"filled", color:null, width:2, opacity:100, radius:0};
+      const nc = {id:uid("c"), from:fromId, to:target.id, style:S.lineStyle, wp:[],
+        startArrow:S.connDefaults.startArrow, endArrow:S.connDefaults.endArrow,
+        color:S.connDefaults.color, width:S.connDefaults.width, opacity:S.connDefaults.opacity, radius:S.connDefaults.radius};
       S.conns.push(nc);
       setSel({k:"conn", id:nc.id});
     }
