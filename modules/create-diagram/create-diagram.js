@@ -51,6 +51,7 @@ const SHAPES = [
   { type: "check",         label: "Check",       w: 90,  h: 90,  icon: `<path d="M4 13l5 6L20 5"/>` },
   { type: "doubleArrow",   label: "2-way arrow", w: 140, h: 60,  icon: `<line x1="3" y1="12" x2="21" y2="12"/><path d="M3 12l4-4M3 12l4 4"/><path d="M21 12l-4-4M21 12l-4 4"/>` },
   { type: "banner",        label: "Banner",      w: 150, h: 90,  icon: `<path d="M3 4h18v11c-2-2-4 2-6 0s-4 2-6 0-4 2-6 0z"/>` },
+  { type: "sticky",        label: "Sticky Note", w: 160, h: 160, defFill: "#fff176", icon: `<rect x="3" y="3" width="18" height="18" rx="1"/><line x1="6" y1="9" x2="16" y2="9" stroke-width="1"/><line x1="6" y1="13" x2="14" y2="13" stroke-width="1"/>` },
 ];
 
 const COLORS = [
@@ -131,6 +132,7 @@ function newState() {
     tool: null,           // null | "text" | "connect"
     lineStyle: "straight", // default for new connectors
     connDefaults: { color: null, width: 2, opacity: 100, radius: 0, startArrow: "none", endArrow: "filled" },
+    freehand: { color: "#0c0b09", width: 3 },
     pendingColor: null,
     theme: "dark",         // canvas theme key
     exportBorder: true,    // draw a border frame around downloaded PNG
@@ -283,9 +285,11 @@ const TB = {
   imprt:   `<path d="M4 12v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M12 15V3"/><path d="M8 11l4 4 4-4"/>`,
   newDoc:  `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="9" y1="15" x2="15" y2="15"/>`,
   lineUp:  `<line x1="5" y1="6" x2="19" y2="6"/><circle cx="10" cy="6" r="2" fill="currentColor"/><line x1="5" y1="12" x2="19" y2="12"/><circle cx="15" cy="12" r="2" fill="currentColor"/><line x1="5" y1="18" x2="19" y2="18"/><circle cx="8" cy="18" r="2" fill="currentColor"/>`,
+  freehand: `<path d="M3 15c2-4 4-4 6 0s4 4 6 0 4-4 6 0" fill="none"/>`,
 };
 
 function buildToolbar() {
+  if (S.tool !== "freehand") removeFreehandPanel();
   const hasSel = !!S.sel;
   const hasNode = hasSel && S.sel.k === "node";
   el.toolbar.innerHTML = [
@@ -302,6 +306,7 @@ function buildToolbar() {
     tbBtn("tb-lu", TB.lineUp,"Line-Up: line style, thickness, opacity, corners", false, S.tool==="connect" || (el.popup && !el.popup.classList.contains("hidden") && el.popup.dataset.mode === "lineup")),
     tbBtn("tb-br", TB.brush, "Fill color"),
     tbBtn("tb-tx", TB.text,  "Text tool", false, S.tool==="text"),
+    tbBtn("tb-fh", TB.freehand, "Freehand drawing", false, S.tool==="freehand"),
     tbBtn("tb-th", TB.theme, "Canvas theme"),
     tbSep(),
     tbBtn("tb-rn", TB.rename,"Rename", !hasNode),
@@ -309,7 +314,7 @@ function buildToolbar() {
     tbBtn("tb-ps", TB.paste, "Paste", !S._clipboard),
     tbBtn("tb-del",TB.trash, "Delete", !hasSel),
     tbSep(),
-    tbBtn("tb-ex", TB.exprt, "Export diagram"),
+    tbBtn("tb-ex", TB.exprt, "Save As..."),
     tbBtn("tb-im", TB.imprt, "Import diagram / image"),
     tbBtn("tb-dl", TB.dl,    "Download PNG"),
   ].join("");
@@ -324,12 +329,13 @@ function buildToolbar() {
   on("tb-lu",  openLineUpPopup);
   on("tb-br",  openColorPopup);
   on("tb-tx",  toggleTextTool);
+  on("tb-fh",  toggleFreehandTool);
   on("tb-th",  openThemePopup);
   on("tb-rn",  handleRename);
   on("tb-cp",  copyNode);
   on("tb-ps",  pasteNode);
   on("tb-del", deleteSel);
-  on("tb-ex",  exportDiagram);
+  on("tb-ex",  openSaveAsModal);
   on("tb-im",  importDiagram);
   on("tb-dl",  downloadPng);
 }
@@ -375,6 +381,7 @@ function canvasDown(e) {
   if (e.target !== el.svg && e.target !== el.gridBg && e.target.id !== "dd-vp") return;
   if (S.tool === "text") { placeText(e); return; }
   if (S.tool === "connect") { startFreeConnect(e); return; }
+  if (S.tool === "freehand") { startFreehandStroke(e); return; }
   startPan(e);
   setSel(null);
 }
@@ -545,22 +552,147 @@ function addShape(type) {
     id: uid("n"), type, label: def.label,
     x: vis.x + 20 + (i % cols) * 150,
     y: vis.y + 20 + Math.floor(i / cols) * 110,
-    w: def.w, h: def.h, fill: null,
+    w: def.w, h: def.h, fill: def.defFill || null,
   };
   S.nodes.push(node);
   setSel({ k: "node", id: node.id });
 }
 
 // ================================================================
-// TEXT TOOL
+// FREEHAND DRAWING TOOL
 // ================================================================
 
-function toggleTextTool() {
-  if (S.tool === "text") { S.tool = null; }
-  else { S.tool = "text"; }
-  el.svg.style.cursor = S.tool === "text" ? "text" : "grab";
-  closePopup();
+function toggleFreehandTool() {
+  if (S.tool === "freehand") {
+    S.tool = null;
+    el.svg.style.cursor = "grab";
+    removeFreehandPanel();
+  } else {
+    S.tool = "freehand";
+    el.svg.style.cursor = "crosshair";
+    closePopup();
+    renderFreehandPanel();
+  }
   buildToolbar();
+}
+
+function removeFreehandPanel() {
+  const p = document.getElementById("dd-freehand-panel");
+  if (p) p.remove();
+}
+
+/** Small floating panel while the Freehand tool is active: brush on/off, color,
+ *  stroke-width slider, and a "Stop Drawing" button — mirrors the draw.io-style
+ *  freehand tool panel (checkbox + gear + slider + stop button). */
+function renderFreehandPanel() {
+  removeFreehandPanel();
+  const wrap = document.getElementById("dd-canvas-wrap");
+  const t = theme();
+  const panel = document.createElement("div");
+  panel.id = "dd-freehand-panel";
+  panel.style.cssText = `
+    position:absolute; top:10px; left:10px; z-index:9; width:190px;
+    background:var(--color-bg-raised); border:1px solid var(--color-border-strong);
+    border-radius:var(--radius-md); padding:10px 12px; font-size:12px; color:${t.text};`;
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-weight:600">Freehand</span>
+      <button id="dd-fh-close" title="Stop Drawing" style="background:none;border:none;color:${t.text};opacity:0.6;cursor:pointer;font-size:14px;line-height:1">✕</button>
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px;cursor:pointer">
+      <input id="dd-fh-brush" type="checkbox" checked style="accent-color:${t.sel}">
+      <span>Brush</span>
+      <span id="dd-fh-swatch" style="margin-left:auto;width:16px;height:16px;border-radius:50%;border:1px solid ${t.border};background:${S.freehand.color};cursor:pointer"></span>
+    </label>
+    <input id="dd-fh-width" type="range" min="1" max="16" step="1" value="${S.freehand.width}" style="width:100%;margin-bottom:10px">
+    <button id="dd-fh-stop" class="btn btn-primary" style="width:100%;padding:7px;border:none">Stop Drawing</button>
+  `;
+  wrap.appendChild(panel);
+
+  document.getElementById("dd-fh-close").addEventListener("click", () => toggleFreehandTool());
+  document.getElementById("dd-fh-stop").addEventListener("click", () => toggleFreehandTool());
+  document.getElementById("dd-fh-brush").addEventListener("change", e => {
+    // Unchecking Brush pauses drawing (cursor back to grab) without closing the panel
+    if (e.target.checked) { S.tool = "freehand"; el.svg.style.cursor = "crosshair"; }
+    else { S.tool = null; el.svg.style.cursor = "grab"; }
+  });
+  document.getElementById("dd-fh-width").addEventListener("input", e => {
+    S.freehand.width = parseInt(e.target.value, 10);
+  });
+  document.getElementById("dd-fh-swatch").addEventListener("click", e => {
+    e.stopPropagation();
+    openFreehandColorPopup(e.currentTarget);
+  });
+  panel.addEventListener("mousedown", e => e.stopPropagation());
+  panel.addEventListener("click", e => e.stopPropagation());
+}
+
+function openFreehandColorPopup(anchor) {
+  const old = document.getElementById("dd-fh-color-popup");
+  if (old) { old.remove(); return; }
+  const wrap = document.getElementById("dd-canvas-wrap");
+  const t = theme();
+  const popup = document.createElement("div");
+  popup.id = "dd-fh-color-popup";
+  popup.style.cssText = `
+    position:absolute; z-index:10; background:var(--color-bg-raised);
+    border:1px solid var(--color-border-strong); border-radius:var(--radius-md); padding:6px;
+    display:flex; gap:4px; flex-wrap:wrap; max-width:170px;`;
+  const wrapRect = wrap.getBoundingClientRect();
+  const aRect = anchor.getBoundingClientRect();
+  popup.style.left = (aRect.left - wrapRect.left - 150) + "px";
+  popup.style.top  = (aRect.bottom - wrapRect.top + 6) + "px";
+  const swatches = [{hex:"#0c0b09"},{hex:"#ffffff"},{hex:"#d4ff3a"},{hex:"#4ee08a"},{hex:"#5ab8ff"},{hex:"#ff8a5c"},{hex:"#ff5a4e"},{hex:"#b06cf2"}];
+  popup.innerHTML = swatches.map(c => `<button data-fhc="${c.hex}" style="width:20px;height:20px;border-radius:50%;border:1.5px solid ${S.freehand.color===c.hex?t.sel:"rgba(0,0,0,0.15)"};background:${c.hex};cursor:pointer;padding:0"></button>`).join("");
+  popup.querySelectorAll("[data-fhc]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    S.freehand.color = b.dataset.fhc;
+    document.getElementById("dd-fh-swatch").style.background = S.freehand.color;
+    popup.remove();
+  }));
+  popup.addEventListener("mousedown", e => e.stopPropagation());
+  wrap.appendChild(popup);
+}
+
+/** Captures a freehand stroke: collects raw canvas points on mousemove, then on
+ *  release stores them normalized (0..1) relative to the stroke's own bounding box
+ *  so the resulting shape can be moved/resized like any other node. */
+function startFreehandStroke(evt) {
+  const raw = [svgPt(evt)];
+  const tmp = svgEl("path");
+  tmp.setAttribute("fill", "none");
+  tmp.setAttribute("stroke", S.freehand.color);
+  tmp.setAttribute("stroke-width", String(S.freehand.width));
+  tmp.setAttribute("stroke-linecap", "round");
+  tmp.setAttribute("stroke-linejoin", "round");
+  tmp.style.pointerEvents = "none";
+  el.vp.appendChild(tmp);
+
+  const mv = e => {
+    e.preventDefault();
+    raw.push(svgPt(e));
+    tmp.setAttribute("d", curvedPath(raw));
+  };
+  const up = () => {
+    tmp.remove();
+    off(mv, up);
+    if (raw.length < 2) return;
+    const PAD = (S.freehand.width || 3);
+    const minX = Math.min(...raw.map(p=>p.x)) - PAD, maxX = Math.max(...raw.map(p=>p.x)) + PAD;
+    const minY = Math.min(...raw.map(p=>p.y)) - PAD, maxY = Math.max(...raw.map(p=>p.y)) + PAD;
+    const w = Math.max(maxX - minX, 4), h = Math.max(maxY - minY, 4);
+    snap();
+    const node = {
+      id: uid("n"), type: "freehand", label: "",
+      x: minX, y: minY, w, h, fill: null,
+      strokeColor: S.freehand.color, freehandWidth: S.freehand.width,
+      points: raw.map(p => [(p.x - minX) / w, (p.y - minY) / h]),
+    };
+    S.nodes.push(node);
+    draw(); buildToolbar();
+    // Tool stays active so you can keep drawing more strokes, like the panel implies
+  };
+  listen(mv, up);
 }
 
 function placeText(evt) {
@@ -920,6 +1052,94 @@ function handleRename() {
 }
 
 // ================================================================
+// SAVE AS (draw.io-style dialog: filename, type, where, cancel/reset/save)
+// ================================================================
+
+function openSaveAsModal() {
+  closeSaveAsModal();
+  const t = theme();
+  const defaultName = S.name || "Untitled Diagram";
+  const overlay = document.createElement("div");
+  overlay.id = "dd-saveas-overlay";
+  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;display:flex;align-items:center;justify-content:center;`;
+  overlay.innerHTML = `
+    <div id="dd-saveas-modal" style="background:var(--color-bg-raised);border-radius:var(--radius-md);padding:20px 22px;width:340px;display:flex;flex-direction:column;gap:14px;color:${t.text};font-size:13px;box-shadow:0 10px 40px rgba(0,0,0,0.4)">
+      <div style="font-weight:600;font-size:15px">Save as</div>
+      <label style="display:flex;flex-direction:column;gap:4px">
+        <span style="opacity:0.7">Save as</span>
+        <input id="dd-sa-name" type="text" value="${esc(defaultName)}" style="padding:7px 9px;border-radius:6px;border:1px solid var(--color-border-strong);background:var(--color-bg);color:${t.text}">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px">
+        <span style="opacity:0.7">Type</span>
+        <select id="dd-sa-type" style="padding:7px 9px;border-radius:6px;border:1px solid var(--color-border-strong);background:var(--color-bg);color:${t.text}">
+          <option value="json">ArchitectSmartCraft File (.json)</option>
+          <option value="png">Editable Bitmap Image (.png)</option>
+          <option value="svg">Editable Vector Image (.svg)</option>
+        </select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:4px">
+        <span style="opacity:0.7">Where</span>
+        <select id="dd-sa-where" style="padding:7px 9px;border-radius:6px;border:1px solid var(--color-border-strong);background:var(--color-bg);color:${t.text}">
+          <option value="download">Download to Device</option>
+          <option value="browser">Save to Browser (Saved Diagrams)</option>
+        </select>
+      </label>
+      <p id="dd-sa-hint" style="font-size:11px;color:var(--color-text-tertiary);margin:0"></p>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:2px">
+        <button id="dd-sa-cancel" class="btn" style="padding:7px 14px">Cancel</button>
+        <button id="dd-sa-reset" class="btn" style="padding:7px 14px">Reset</button>
+        <button id="dd-sa-save" class="btn btn-primary" style="padding:7px 16px;border:none">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const typeSel = document.getElementById("dd-sa-type");
+  const whereSel = document.getElementById("dd-sa-where");
+  const hint = document.getElementById("dd-sa-hint");
+  const updateHint = () => {
+    if (typeSel.value !== "json" && whereSel.value === "browser") {
+      hint.textContent = "Image formats always download to your device — Browser storage keeps the editable diagram (.json).";
+    } else {
+      hint.textContent = "";
+    }
+  };
+  typeSel.addEventListener("change", updateHint);
+  whereSel.addEventListener("change", updateHint);
+
+  overlay.addEventListener("mousedown", e => { if (e.target === overlay) closeSaveAsModal(); });
+  document.getElementById("dd-sa-cancel").addEventListener("click", closeSaveAsModal);
+  document.getElementById("dd-sa-reset").addEventListener("click", () => {
+    document.getElementById("dd-sa-name").value = defaultName;
+    typeSel.value = "json";
+    whereSel.value = "download";
+    updateHint();
+  });
+  document.getElementById("dd-sa-save").addEventListener("click", async () => {
+    const name = document.getElementById("dd-sa-name").value.trim() || "Untitled Diagram";
+    const type = typeSel.value;
+    const where = whereSel.value;
+    S.name = name;
+    if (el.name) el.name.value = name;
+    closeSaveAsModal();
+    if (where === "browser") {
+      await save(); // existing browser-storage save (always stores the editable diagram)
+    } else if (type === "png") {
+      await downloadPng();
+    } else if (type === "svg") {
+      downloadSvgFile();
+    } else {
+      exportDiagram();
+    }
+  });
+}
+
+function closeSaveAsModal() {
+  const o = document.getElementById("dd-saveas-overlay");
+  if (o) o.remove();
+}
+
+// ================================================================
 // EXPORT / IMPORT DIAGRAM
 // ================================================================
 
@@ -927,7 +1147,7 @@ function exportDiagram() {
   const data = {
     format: "ArchitectSmartCraft", version: "2.5",
     name: S.name, theme: S.theme,
-    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})=>({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})),
+    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData,rotate,strokeColor,borderStyle,points,freehandWidth})=>({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData,rotate:rotate||0,strokeColor:strokeColor||null,borderStyle:borderStyle||null,points:points||undefined,freehandWidth:freehandWidth||undefined})),
     conns: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt,color,width,opacity,radius})=>({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt,color:color||null,width:width||2,opacity:opacity!=null?opacity:100,radius:radius||0})),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -1091,9 +1311,14 @@ function drawNode(node) {
   } else {
     shape = buildShape(node);
     const t = theme();
-    const fill = (node.type === "text" || node.type === "group") ? "transparent" : (node.fill || t.fill);
+    const fill = (node.type === "text" || node.type === "group" || node.type === "freehand") ? "transparent" : (node.fill || t.fill);
     shape.setAttribute("fill", fill);
-    if (node.type !== "text") {
+    if (node.type === "freehand") {
+      // Freehand strokes keep their own captured color/width; selection just adds
+      // a thin highlight bump rather than the heavier default selection outline.
+      shape.setAttribute("stroke", isSel ? t.sel : (node.strokeColor || "#0c0b09"));
+      shape.setAttribute("stroke-width", String((node.freehandWidth || 3) + (isSel ? 1 : 0)));
+    } else if (node.type !== "text") {
       // stroke color: per-node override > selection highlight > theme default
       const strokeClr = isSel ? t.sel : (node.strokeColor || t.stroke);
       shape.setAttribute("stroke", strokeClr);
@@ -1137,7 +1362,7 @@ function drawNode(node) {
   }
 
   // label (skip for image nodes or show below)
-  if (node.type !== "image") {
+  if (node.type !== "image" && node.type !== "freehand") {
     const txt = svgEl("text");
     txt.setAttribute("x", labelX(node));
     txt.setAttribute("y", labelY(node));
@@ -2132,6 +2357,11 @@ function buildShape(node) {
       const d=`M${x} ${y}H${x+w}V${y+bh}C${x+w*.75} ${y+h} ${x+w*.6} ${y+bh-h*.12} ${x+w*.42} ${y+bh}C${x+w*.28} ${y+bh+h*.1} ${x+w*.12} ${y+h} ${x} ${y+bh}Z`;
       return mkEl("path",{d});
     }
+    case "sticky":        return mkEl("rect",{x,y,width:w,height:h,rx:3});
+    case "freehand": {
+      const pts = (node.points||[]).map(([fx,fy]) => ({x: x+fx*w, y: y+fy*h}));
+      return mkEl("path", { d: curvedPath(pts), fill: "none" });
+    }
     default:              return mkEl("rect",{x,y,width:w,height:h,rx:6});
   }
 }
@@ -2223,8 +2453,10 @@ function roundedPath(rawPoints, radius) {
 // PNG EXPORT
 // ================================================================
 
-async function downloadPng() {
-  if (!S.nodes.length && !S.conns.length) { toast("Add something first"); return; }
+/** Builds the exportable SVG markup for the current diagram (used by both the PNG
+ *  and SVG "Save As" options) — returns null if the canvas is empty. */
+function buildExportSvg() {
+  if (!S.nodes.length && !S.conns.length) return null;
   const PAD=40, b=contentBounds();
   const w=b.maxX-b.minX+PAD*2, h=b.maxY-b.minY+PAD*2;
   const ox=PAD-b.minX, oy=PAD-b.minY;
@@ -2300,27 +2532,47 @@ async function downloadPng() {
   });
 
   S.nodes.forEach(n => {
-    const fill = (n.type==="text" || n.type==="group") ? "transparent" : (n.fill||t.fill);
+    const fill = (n.type==="text" || n.type==="group" || n.type==="freehand") ? "transparent" : (n.fill||t.fill);
     const stroke = (n.type==="text") ? "none" : t.stroke;
     const rot = n.rotate ? `rotate(${n.rotate},${n.x+n.w/2},${n.y+n.h/2})` : null;
     if (rot) svg += `<g transform="${rot}">`;
     svg += shapeToSvgStr(n, fill, stroke);
-    const fontSize = n.fontSize || 12;
-    const tc = n.textColor || (lightOrDark(fill)==="dark"?t.text:"#0c0b09");
-    svg += `<text x="${labelX(n)}" y="${labelY(n)}" text-anchor="${labelAnchor(n)}" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    if (n.type !== "freehand") {
+      const fontSize = n.fontSize || 12;
+      const tc = n.textColor || (lightOrDark(fill)==="dark"?t.text:"#0c0b09");
+      svg += `<text x="${labelX(n)}" y="${labelY(n)}" text-anchor="${labelAnchor(n)}" fill="${tc}" font-size="${fontSize}" font-family="JetBrains Mono,monospace">${escXml(n.label)}</text>`;
+    }
     if (rot) svg += `</g>`;
   });
 
   svg += "</g>";
   if (extraMarkers) svg += `<defs>${extraMarkers}</defs>`;
   svg += "</svg>";
+  return { svg, w, h };
+}
 
+async function downloadPng() {
+  const built = buildExportSvg();
+  if (!built) { toast("Add something first"); return; }
+  const { svg, w, h } = built;
   try {
     const url = await svg2png(svg, w, h);
     const a = document.createElement("a");
     a.href = url; a.download = `${(S.name||"diagram").replace(/[^a-z0-9_-]/gi,"_")}.png`;
     document.body.appendChild(a); a.click(); a.remove(); toast("Downloaded");
   } catch(e) { toast("Download failed"); console.error(e); }
+}
+
+function downloadSvgFile() {
+  const built = buildExportSvg();
+  if (!built) { toast("Add something first"); return; }
+  const blob = new Blob([built.svg], { type: "image/svg+xml" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `${(S.name||"diagram").replace(/[^a-z0-9_-]/gi,"_")}.svg`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("Downloaded");
 }
 
 function shapeToSvgStr(node, fill, stroke) {
@@ -2376,6 +2628,12 @@ function shapeToSvgStr(node, fill, stroke) {
       const d=`M${x} ${y}H${x+w}V${y+bh}C${x+w*.75} ${y+h} ${x+w*.6} ${y+bh-h*.12} ${x+w*.42} ${y+bh}C${x+w*.28} ${y+bh+h*.1} ${x+w*.12} ${y+h} ${x} ${y+bh}Z`;
       return `<path d="${d}" ${fa} ${sa}/>`;
     }
+    case "sticky": return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" ${fa} ${sa}/>`;
+    case "freehand": {
+      const pts = (node.points||[]).map(([fx,fy]) => ({x: x+fx*w, y: y+fy*h}));
+      const fc = node.strokeColor || "#0c0b09", fw = node.freehandWidth || 3;
+      return `<path d="${curvedPath(pts)}" fill="none" stroke="${fc}" stroke-width="${fw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
     default: return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" ${fa} ${sa}/>`;
   }
 }
@@ -2387,7 +2645,7 @@ function shapeToSvgStr(node, fill, stroke) {
 async function save() {
   const saved = await storage.diagrams.save({
     id: S.id, name: S.name,
-    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null,imageData:imageData||null})),
+    nodes: S.nodes.map(({id,type,label,x,y,w,h,fill,fontSize,textColor,imageData,rotate,strokeColor,borderStyle,points,freehandWidth})=>({id,type,label,x,y,w,h,fill,fontSize:fontSize||null,textColor:textColor||null,imageData:imageData||null,rotate:rotate||0,strokeColor:strokeColor||null,borderStyle:borderStyle||null,points:points||null,freehandWidth:freehandWidth||null})),
     connectors: S.conns.map(({id,from,to,style,wp,startArrow,endArrow,fromPt,toPt,color,width,opacity,radius})=>({id,from,to,style,wp:wp||[],startArrow:startArrow||"none",endArrow:endArrow||"filled",fromPt:fromPt||null,toPt:toPt||null,color:color||null,width:width||2,opacity:opacity!=null?opacity:100,radius:radius||0})),
   });
   S.id = saved.id;
