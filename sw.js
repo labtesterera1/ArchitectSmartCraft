@@ -12,7 +12,7 @@
  * ----------------------------------------------------------------
  */
 
-const CACHE_VERSION = "3.2.0";
+const CACHE_VERSION = "3.2.1";
 const CACHE_NAME = `architectsmartcraft-v${CACHE_VERSION}`;
 
 const APP_SHELL_FILES = [
