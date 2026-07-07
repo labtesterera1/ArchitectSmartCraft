@@ -1547,12 +1547,51 @@ function drawConn(conn) {
 
   const g = svgEl("g");
 
-  // hit area
+  // hit area — click to select, OR press-and-drag anywhere along the line to bend
+  // it right there (inserts/moves a waypoint under the cursor), the same way Miro
+  // lets you grab any point on a connector and pull it into a curve.
   const hit = svgEl("path");
   hit.setAttribute("d", d); hit.setAttribute("fill", "none");
   hit.setAttribute("stroke", "transparent"); hit.setAttribute("stroke-width", "14");
   hit.style.cursor = "pointer";
-  hit.addEventListener("click", e => { e.stopPropagation(); setSel({k:"conn",id:conn.id}); });
+  {
+    let bendStart = null, bendPre = null, bendMoved = false, bendIdx = null;
+    const bendDown = e => {
+      e.stopPropagation();
+      if (!isSel) setSel({ k: "conn", id: conn.id });
+      bendStart = svgPt(e); bendMoved = false;
+      bendPre = { nodes: structuredClone(S.nodes), conns: structuredClone(S.conns) };
+      const allPts = [p1, ...wp, p2];
+      let best = { dist: Infinity, idx: 0 };
+      for (let i = 0; i < allPts.length - 1; i++) {
+        const proj = closestPointOnSegment(allPts[i], allPts[i+1], bendStart);
+        const dist = Math.hypot(proj.x - bendStart.x, proj.y - bendStart.y);
+        if (dist < best.dist) best = { dist, idx: i };
+      }
+      conn.wp = conn.wp || [];
+      conn.wp.splice(best.idx, 0, { x: bendStart.x, y: bendStart.y });
+      bendIdx = best.idx;
+      listen(bendMv, bendUp);
+    };
+    const bendMv = e => {
+      e.preventDefault(); const p = svgPt(e);
+      if (Math.abs(p.x - bendStart.x) > 2 || Math.abs(p.y - bendStart.y) > 2) bendMoved = true;
+      conn.wp[bendIdx] = { x: p.x, y: p.y };
+      draw();
+    };
+    const bendUp = () => {
+      if (!bendMoved) {
+        // Plain click, not a drag — don't leave behind an unwanted waypoint
+        conn.wp.splice(bendIdx, 1);
+      } else if (bendPre) {
+        S.undo.push(bendPre); if (S.undo.length > MAX_UNDO) S.undo.shift(); S.redo = [];
+      }
+      draw(); buildToolbar();
+      bendStart = null; bendPre = null; off(bendMv, bendUp);
+    };
+    hit.addEventListener("mousedown", bendDown);
+    hit.addEventListener("touchstart", bendDown, { passive: false });
+  }
   g.appendChild(hit);
 
   // visible line — custom color/thickness/opacity (Miro-style connector styling), falls
@@ -1579,10 +1618,13 @@ function drawConn(conn) {
   line.style.pointerEvents = "none";
   g.appendChild(line);
 
-  // when selected: waypoint handles + add button + line-style toolbar
-  // Show endpoint dots for freeform (non-node-attached) start/end points
-  if (!fn) drawEndpointDot(g, p1, conn, "fromPt", isSel);
-  if (!tn) drawEndpointDot(g, p2, conn, "toPt", isSel);
+  // Endpoint handles: always shown for freeform (non-node-attached) ends so you can
+  // see where they float; ALSO shown for node-attached ends whenever the connector
+  // is selected, so either end can be grabbed and re-anchored to a different box
+  // at any time (dragging clears the attachment and re-snaps on release, same as
+  // a freeform end already did).
+  if (!fn || isSel) drawEndpointDot(g, p1, conn, "fromPt", isSel);
+  if (!tn || isSel) drawEndpointDot(g, p2, conn, "toPt", isSel);
 
   if (isSel) {
     const allPts = [p1, ...wp, p2];
@@ -2142,6 +2184,18 @@ function curvedPath(pts, tension = 6) {
 /** Builds a polyline path with rounded (arc-style) interior corners — used to give
  *  orthogonal/right-angle connectors Miro-style adjustable corner radii. Falls back
  *  to plain straight segments when radius is 0. */
+/** Projects point p onto segment a-b, clamped to the segment — used to find where
+ *  along a connector a drag started, so a new waypoint gets inserted in the right
+ *  spot when the user grabs the line anywhere along its length. */
+function closestPointOnSegment(a, b, p) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const lenSq = dx*dx + dy*dy;
+  if (lenSq === 0) return { x: a.x, y: a.y };
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
 function roundedPath(rawPoints, radius) {
   // Drop consecutive duplicate points (common when a segment has zero length)
   const points = rawPoints.filter((p, i) => i === 0 || Math.hypot(p.x-rawPoints[i-1].x, p.y-rawPoints[i-1].y) > 0.5);
