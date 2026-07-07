@@ -160,12 +160,20 @@ function normConn(c) {
 
 export async function initCreateDiagramView(container) {
   S = newState();
-  const savedTheme = await storage.settings.get("diagramTheme");
-  if (savedTheme && THEMES.find(t => t.key === savedTheme)) S.theme = savedTheme;
-  const savedBorder = await storage.settings.get("exportBorder");
-  if (typeof savedBorder === "boolean") S.exportBorder = savedBorder;
-  const savedShapes = await storage.settings.get("customShapes");
-  if (Array.isArray(savedShapes)) customShapes = savedShapes;
+  try {
+    const savedTheme = await storage.settings.get("diagramTheme");
+    if (savedTheme && THEMES.find(t => t.key === savedTheme)) S.theme = savedTheme;
+    const savedBorder = await storage.settings.get("exportBorder");
+    if (typeof savedBorder === "boolean") S.exportBorder = savedBorder;
+    const savedShapes = await storage.settings.get("customShapes");
+    if (Array.isArray(savedShapes)) customShapes = savedShapes;
+    await restoreAutosaveDraft();
+  } catch (e) {
+    // A corrupted setting or draft should never block the app from opening —
+    // fall back to a clean blank canvas and log the real cause for diagnosis.
+    console.error("Failed to restore saved settings/draft, starting fresh:", e);
+    S = newState();
+  }
   buildShell(container);
   draw();
   loadSavedList();
@@ -346,24 +354,29 @@ function on(id, fn) { document.getElementById(id).addEventListener("click", fn);
 // ================================================================
 
 function buildPalette() {
-  el.palette.innerHTML = `<span class="label" style="margin-bottom:8px">Shapes</span>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">${SHAPES.map(s =>
-    `<button class="btn" data-shape="${s.type}" title="${s.label}" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;line-height:0">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">${s.icon}</svg>
-      <span style="font-size:8px;line-height:1">${s.label}</span></button>`
-  ).join("")}</div>
-  <div style="margin-top:12px;border-top:1px solid var(--color-border);padding-top:10px">
-    <span class="label" style="margin-bottom:6px">Store Shapes</span>
-    <div id="dd-custom-shapes" style="display:grid;grid-template-columns:1fr 1fr;gap:5px"></div>
-    <label class="btn btn-block mt-1" style="font-size:10px;cursor:pointer;justify-content:center;padding:6px">
-      + Upload
-      <input type="file" id="dd-shape-upload" accept="image/*" class="hidden" multiple/>
-    </label>
-  </div>`;
-  el.palette.querySelectorAll("[data-shape]").forEach(b =>
-    b.addEventListener("click", () => addShape(b.dataset.shape)));
-  document.getElementById("dd-shape-upload").addEventListener("change", handleShapeUpload);
-  renderCustomShapes();
+  try {
+    el.palette.innerHTML = `<span class="label" style="margin-bottom:8px">Shapes</span>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">${SHAPES.map(s =>
+      `<button class="btn" data-shape="${s.type}" title="${s.label}" style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;line-height:0">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">${s.icon}</svg>
+        <span style="font-size:8px;line-height:1">${s.label}</span></button>`
+    ).join("")}</div>
+    <div style="margin-top:12px;border-top:1px solid var(--color-border);padding-top:10px">
+      <span class="label" style="margin-bottom:6px">Store Shapes</span>
+      <div id="dd-custom-shapes" style="display:grid;grid-template-columns:1fr 1fr;gap:5px"></div>
+      <label class="btn btn-block mt-1" style="font-size:10px;cursor:pointer;justify-content:center;padding:6px">
+        + Upload
+        <input type="file" id="dd-shape-upload" accept="image/*" class="hidden" multiple/>
+      </label>
+    </div>`;
+    el.palette.querySelectorAll("[data-shape]").forEach(b =>
+      b.addEventListener("click", () => addShape(b.dataset.shape)));
+    document.getElementById("dd-shape-upload").addEventListener("change", handleShapeUpload);
+  } catch (e) {
+    console.error("buildPalette failed:", e);
+    el.palette.innerHTML = `<p style="font-size:11px;color:var(--color-text-tertiary)">Shapes panel failed to load — open the browser console (F12) and share the error shown there.</p>`;
+  }
+  try { renderCustomShapes(); } catch (e) { console.error("renderCustomShapes failed:", e); }
 }
 
 // ================================================================
@@ -535,6 +548,7 @@ function clearCanvas() {
   S.name = "Untitled"; S.id = null;
   el.name.value = S.name;
   setSel(null);
+  clearAutosaveDraft();
   toast("Canvas cleared");
 }
 
@@ -1263,8 +1277,46 @@ Rules: type=rect|rounded|ellipse|diamond|cylinder|cloud|hexagon|parallelogram|tr
 function draw() {
   el.vp.innerHTML = "";
   applyVP();
-  S.conns.forEach(drawConn);
-  S.nodes.forEach(drawNode);
+  S.conns.forEach(c => { try { drawConn(c); } catch (e) { console.error("drawConn failed for", c && c.id, e); } });
+  S.nodes.forEach(n => { try { drawNode(n); } catch (e) { console.error("drawNode failed for", n && n.id, e); } });
+  scheduleAutosave();
+}
+
+// ================================================================
+// AUTOSAVE DRAFT — protects unsaved work across page reloads (e.g. the
+// automatic reload that happens when a new app version is deployed).
+// Mirrors the current in-progress canvas to IndexedDB on a debounce, and
+// restores it on next load if the user never explicitly hit Save.
+// ================================================================
+
+const AUTOSAVE_KEY = "autosaveDraft";
+let _autosaveTimer = null;
+
+function scheduleAutosave() {
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(() => {
+    storage.settings.set(AUTOSAVE_KEY, {
+      name: S.name, id: S.id, nodes: S.nodes, conns: S.conns, ts: Date.now(),
+    }).catch(() => {});
+  }, 600);
+}
+
+async function restoreAutosaveDraft() {
+  try {
+    const draft = await storage.settings.get(AUTOSAVE_KEY);
+    if (!draft) return;
+    const hasContent = (Array.isArray(draft.nodes) && draft.nodes.length) || (Array.isArray(draft.conns) && draft.conns.length);
+    if (!hasContent) return;
+    S.nodes = draft.nodes || [];
+    S.conns = (draft.conns || []).map(normConn);
+    S.name = draft.name || S.name;
+    S.id = draft.id || null;
+  } catch (e) { /* no draft yet, or storage unavailable — start with a blank canvas */ }
+}
+
+function clearAutosaveDraft() {
+  clearTimeout(_autosaveTimer);
+  storage.settings.set(AUTOSAVE_KEY, { name: "Untitled", id: null, nodes: [], conns: [], ts: Date.now() }).catch(() => {});
 }
 
 // ================================================================
