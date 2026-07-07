@@ -299,7 +299,7 @@ function buildToolbar() {
     tbBtn("tb-re", TB.redo, "Redo",  S.redo.length===0),
     tbSep(),
     tbBtn("tb-cn", TB.conn,  "Connector tool", false, S.tool==="connect"),
-    tbBtn("tb-lu", TB.lineUp,"Line-Up: line style, thickness, opacity, corners"),
+    tbBtn("tb-lu", TB.lineUp,"Line-Up: line style, thickness, opacity, corners", false, S.tool==="connect" || (el.popup && !el.popup.classList.contains("hidden") && el.popup.dataset.mode === "lineup")),
     tbBtn("tb-br", TB.brush, "Fill color"),
     tbBtn("tb-tx", TB.text,  "Text tool", false, S.tool==="text"),
     tbBtn("tb-th", TB.theme, "Canvas theme"),
@@ -639,12 +639,25 @@ function openColorPopup() {
 // ================================================================
 
 function openLineUpPopup() {
-  if (!el.popup.classList.contains("hidden") && el.popup.dataset.mode === "lineup") { closePopup(); return; }
+  const alreadyOpen = !el.popup.classList.contains("hidden") && el.popup.dataset.mode === "lineup";
+  if (alreadyOpen) {
+    closePopup();
+    if (S.tool === "connect") { S.tool = null; el.svg.style.cursor = "grab"; buildToolbar(); }
+    return;
+  }
   el.popup.dataset.mode = "lineup";
   el.popup.style.left = document.getElementById("tb-lu").offsetLeft + "px";
   el.popup.classList.remove("hidden");
   const selConn = (S.sel && S.sel.k === "conn") ? S.conns.find(c => c.id === S.sel.id) : null;
-  if (selConn) snap(); // group every tweak made in this popup session into one undo step
+  if (selConn) {
+    snap(); // group every tweak made in this popup session into one undo step
+  } else {
+    // No line selected: arm the connector tool so the user can immediately drag
+    // a new line between boxes (or on empty canvas) while the panel stays open.
+    S.tool = "connect";
+    el.svg.style.cursor = "crosshair";
+    buildToolbar();
+  }
   renderLineUpPopup();
 }
 
