@@ -573,6 +573,18 @@ function addShape(type) {
 }
 
 // ================================================================
+// TEXT TOOL
+// ================================================================
+
+function toggleTextTool() {
+  if (S.tool === "text") { S.tool = null; }
+  else { S.tool = "text"; }
+  el.svg.style.cursor = S.tool === "text" ? "text" : "grab";
+  closePopup();
+  buildToolbar();
+}
+
+// ================================================================
 // FREEHAND DRAWING TOOL
 // ================================================================
 
