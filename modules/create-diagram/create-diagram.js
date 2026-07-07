@@ -2101,9 +2101,7 @@ function buildShape(node) {
 function buildPath(p1, p2, style, wp, radius) {
   const pts = [p1, ...(wp||[]), p2];
   if (style === "curved") {
-    let d = `M${pts[0].x} ${pts[0].y}`;
-    for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1],dx=b.x-a.x; d+=` C${a.x+dx*.5} ${a.y},${a.x+dx*.5} ${b.y},${b.x} ${b.y}`;}
-    return d;
+    return curvedPath(pts);
   }
   if (style === "orthogonal") {
     const corners = [pts[0]];
@@ -2114,6 +2112,31 @@ function buildPath(p1, p2, style, wp, radius) {
     return roundedPath(corners, radius || 0);
   }
   return `M${pts[0].x} ${pts[0].y} `+pts.slice(1).map(p=>`L${p.x} ${p.y}`).join(" ");
+}
+
+/** Smooth spline through every point (endpoints + any dragged waypoints). Unlike a
+ *  purely-horizontal S-curve, this bends based on the full 2D position of each
+ *  waypoint — so a single waypoint dragged to the side is enough to route a
+ *  connector around an obstacle in between, even when the two endpoints are
+ *  vertically (or diagonally) aligned. Falls back to a gentle horizontal S-curve
+ *  when there are no waypoints, matching the previous look for plain two-point lines. */
+function curvedPath(pts, tension = 6) {
+  if (pts.length < 2) return "";
+  if (pts.length === 2) {
+    const a = pts[0], b = pts[1], dx = b.x - a.x;
+    return `M${a.x} ${a.y} C${a.x+dx*.5} ${a.y},${a.x+dx*.5} ${b.y},${b.x} ${b.y}`;
+  }
+  let d = `M${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / tension, c1y = p1.y + (p2.y - p0.y) / tension;
+    const c2x = p2.x - (p3.x - p1.x) / tension, c2y = p2.y - (p3.y - p1.y) / tension;
+    d += ` C${c1x} ${c1y},${c2x} ${c2y},${p2.x} ${p2.y}`;
+  }
+  return d;
 }
 
 /** Builds a polyline path with rounded (arc-style) interior corners — used to give
